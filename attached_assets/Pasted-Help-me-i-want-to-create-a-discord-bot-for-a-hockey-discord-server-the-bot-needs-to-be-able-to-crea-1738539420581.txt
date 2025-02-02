@@ -1,0 +1,13 @@
+Help me i want to create a discord bot for a hockey discord server. the bot needs to be able to create teams, when the team is created it needs to generate several channels along with a category with that team name and role. the channels needs to be 3 text channels; team chat, signing, roster. there needs to be a media channel; stats pictures. then finally there needs to be a voice channel; team voice channel.
+
+next, there needs to be a way for teams to sign players to contracts. when the command populates it forms a section to select a team for the contract to apply to. the player the contract is being offered to. then the salary that will affect the teams salary cap space. finally there needs to be a length the contract will apply to that team. i want the contract to be created into a embed file where below the player that is being selected for the contract can select a emoji. upon selecting it the player is assigned the role for the team. his salary is applied to the team cap space. 
+
+another feature i want is the ability for teams to release players from their team to waivers. allow a notification to be set to notifiy the set role/s. ( i want the notification to be able to be set thru a command, so the location and the role/s that get notified.) once released the players cap is removed from the old team but tracked, their role is removed from the old team. a timer is started for 48hrs, (i want this timer adjustable thru a command). i want the player to be able to be acquired thru a command the time limit does not need to be reached for them to be able to send a offer to the player. however if the player does not get acquired they become a free agent. (a role is applied, "@free agent" role.).
+
+i want a list team command that will give every team in the league and their current salary cap available.
+
+i want a trade player command, it will need 4 fill in prompts or drop downs. a team the player is being traded from will need to be input. once that is decided the drop down for the available players to be traded will be selected. next the receiving team will be selected. then the player that is being traded will be selected. i need the team roles for each team to be removed from the according player then when he is moved to the following team the new team role needs to be applied. 
+
+i need the ability to modify contracts for a specific player. 
+
+this is the beginning of the bots commands. i know this is pretty comprehensive. if you cannot perform this demand please let me know. if there is anything you are unsure about please ask questions to help clarify the area. i want you to code the bot for me so i can implement it into a bot.
