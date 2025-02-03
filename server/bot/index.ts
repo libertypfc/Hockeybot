@@ -29,21 +29,29 @@ const client = new Client({
 // Initialize the commands collection
 client.commands = new Collection();
 
-client.once(Events.ClientReady, () => {
-  console.log('Discord bot is ready!');
-  registerCommands(client);
+client.once(Events.ClientReady, async (c) => {
+  console.log(`Discord bot is ready! Logged in as ${c.user.tag}`);
+  try {
+    await registerCommands(client);
+    console.log('All commands registered successfully!');
+  } catch (error) {
+    console.error('Failed to register commands:', error);
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);
-  if (!command) return;
+  if (!command) {
+    console.log(`Command not found: ${interaction.commandName}`);
+    return;
+  }
 
   try {
     await command.execute(interaction);
   } catch (error) {
-    console.error(error);
+    console.error(`Error executing command ${interaction.commandName}:`, error);
     await interaction.reply({
       content: 'There was an error executing this command!',
       ephemeral: true,
