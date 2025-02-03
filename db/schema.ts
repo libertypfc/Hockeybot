@@ -1,6 +1,6 @@
-import { pgTable, text, serial, integer, boolean, timestamp, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, unique, decimal } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
@@ -52,11 +52,13 @@ export const teamsRelations = relations(teams, ({ many }) => ({
   contracts: many(contracts),
 }));
 
-export const playersRelations = relations(players, ({ one }) => ({
+export const playersRelations = relations(players, ({ one, many }) => ({
   currentTeam: one(teams, {
     fields: [players.currentTeamId],
     references: [teams.id],
   }),
+  playerStats: many(playerStats),
+  goalieStats: many(goalieStats),
 }));
 
 export const contractsRelations = relations(contracts, ({ one }) => ({
@@ -67,6 +69,49 @@ export const contractsRelations = relations(contracts, ({ one }) => ({
   team: one(teams, {
     fields: [contracts.teamId],
     references: [teams.id],
+  }),
+}));
+
+export const playerStats = pgTable("player_stats", {
+  id: serial("id").primaryKey(),
+  playerId: integer("player_id").references(() => players.id).notNull(),
+  gameDate: timestamp("game_date").notNull(),
+  hits: integer("hits").default(0),
+  fow: integer("fow").default(0),
+  foTaken: integer("fo_taken").default(0),
+  takeaways: integer("takeaways").default(0),
+  interceptions: integer("interceptions").default(0),
+  giveaways: integer("giveaways").default(0),
+  blockedShots: integer("blocked_shots").default(0),
+  passesCompleted: integer("passes_completed").default(0),
+  passesAttempted: integer("passes_attempted").default(0),
+  pim: integer("pim").default(0),
+  shots: integer("shots").default(0),
+});
+
+export const goalieStats = pgTable("goalie_stats", {
+  id: serial("id").primaryKey(),
+  playerId: integer("player_id").references(() => players.id).notNull(),
+  gameDate: timestamp("game_date").notNull(),
+  saves: integer("saves").default(0),
+  goalsAgainst: integer("goals_against").default(0),
+  breakaways: integer("breakaways").default(0),
+  breakawaySaves: integer("breakaway_saves").default(0),
+  desperation_saves: integer("desperation_saves").default(0),
+  timeInNet: integer("time_in_net").default(0),
+});
+
+export const playerStatsRelations = relations(playerStats, ({ one }) => ({
+  player: one(players, {
+    fields: [playerStats.playerId],
+    references: [players.id],
+  }),
+}));
+
+export const goalieStatsRelations = relations(goalieStats, ({ one }) => ({
+  player: one(players, {
+    fields: [goalieStats.playerId],
+    references: [players.id],
   }),
 }));
 
@@ -85,6 +130,14 @@ export const selectWaiverSchema = createSelectSchema(waivers);
 export const insertWaiverSettingsSchema = createInsertSchema(waiverSettings);
 export const selectWaiverSettingsSchema = createSelectSchema(waiverSettings);
 
+export const insertPlayerStatsSchema = createInsertSchema(playerStats);
+export const selectPlayerStatsSchema = createSelectSchema(playerStats);
+
+export const insertGoalieStatsSchema = createInsertSchema(goalieStats);
+export const selectGoalieStatsSchema = createSelectSchema(goalieStats);
+
+export type PlayerStats = typeof playerStats.$inferSelect;
+export type GoalieStats = typeof goalieStats.$inferSelect;
 
 export type Team = typeof teams.$inferSelect;
 export type Player = typeof players.$inferSelect;
