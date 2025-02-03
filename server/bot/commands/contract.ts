@@ -97,7 +97,9 @@ export const ContractCommands = [
           title = 'Entry Level Contract Offer';
           lengthDisplay = '30 weeks';
         } else {
-          salary = interaction.options.getInteger('salary', true);
+          // Convert input from millions to actual dollars
+          const salaryInMillions = interaction.options.getInteger('salary', true);
+          salary = salaryInMillions * 1_000_000;
           length = interaction.options.getInteger('length', true);
           title = 'Contract Offer';
           lengthDisplay = `${length} days`;
