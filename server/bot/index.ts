@@ -1,5 +1,7 @@
 import { Client, GatewayIntentBits, Events, Collection } from 'discord.js';
 import { db } from '@db';
+import { players, contracts, teams } from '@db/schema';
+import { eq, and } from 'drizzle-orm';
 import { registerCommands } from './commands';
 
 // Extend the Client type to include commands
@@ -40,6 +42,92 @@ client.once(Events.ClientReady, async (c) => {
     console.log('All commands registered successfully!');
   } catch (error) {
     console.error('Failed to register commands:', error);
+  }
+});
+
+// Handle contract acceptance via reactions
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  // Ignore bot's own reactions
+  if (user.bot) return;
+
+  try {
+    // Only process checkmark reactions
+    if (reaction.emoji.name !== '✅') return;
+
+    const message = reaction.message;
+
+    // Check if this is a contract offer message
+    if (!message.embeds[0]?.title?.includes('Contract Offer')) return;
+
+    // Find the pending contract for this player
+    const player = await db.query.players.findFirst({
+      where: eq(players.discordId, user.id),
+      with: {
+        currentTeam: true,
+      },
+    });
+
+    if (!player) {
+      console.error('Player not found in database');
+      return;
+    }
+
+    // Find the pending contract
+    const pendingContract = await db.query.contracts.findFirst({
+      where: and(
+        eq(contracts.playerId, player.id),
+        eq(contracts.status, 'pending')
+      ),
+      with: {
+        team: true,
+      },
+    });
+
+    if (!pendingContract || !pendingContract.team) {
+      console.error('No pending contract found');
+      return;
+    }
+
+    // Update contract status to active
+    await db.update(contracts)
+      .set({ status: 'active' })
+      .where(eq(contracts.id, pendingContract.id));
+
+    // Update team's available cap space
+    await db.update(teams)
+      .set({ 
+        availableCap: pendingContract.team.availableCap! - pendingContract.salary 
+      })
+      .where(eq(teams.id, pendingContract.team.id));
+
+    // Update player's team and status
+    await db.update(players)
+      .set({ 
+        currentTeamId: pendingContract.team.id,
+        status: 'signed'
+      })
+      .where(eq(players.id, player.id));
+
+    // Add team role to player
+    const guild = message.guild;
+    if (guild) {
+      const member = await guild.members.fetch(user.id);
+      const teamRole = guild.roles.cache.find(
+        role => role.name === pendingContract.team.name
+      );
+
+      if (teamRole && member) {
+        await member.roles.add(teamRole);
+      }
+    }
+
+    // Update the contract offer message
+    const updatedEmbed = message.embeds[0];
+    updatedEmbed.data.description = `✅ Contract accepted by ${user}`;
+    await message.edit({ embeds: [updatedEmbed] });
+
+  } catch (error) {
+    console.error('Error processing contract acceptance:', error);
   }
 });
 
