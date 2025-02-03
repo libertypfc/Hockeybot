@@ -85,6 +85,50 @@ async function checkExpiredContracts() {
   }
 }
 
+client.on(Events.GuildMemberAdd, async (member) => {
+  try {
+    const welcomeEmbed = new EmbedBuilder()
+      .setTitle('🏒 Welcome to the Hockey League!')
+      .setDescription(
+        `Welcome ${member.user}, to our hockey league!\n\n` +
+        `Here's what you need to know:\n` +
+        `• Use our bot commands to manage your player career\n` +
+        `• View your stats and performance on our web dashboard\n` +
+        `• Teams can offer you contracts which you'll receive via DM\n` +
+        `• Track your progress and milestones through our system\n\n` +
+        `To get started:\n` +
+        `1. Wait for a team to offer you a contract\n` +
+        `2. Accept the contract by reacting with ✅\n` +
+        `3. Start playing and tracking your stats!\n\n` +
+        `Good luck and have fun! 🎮`
+      )
+      .setColor('#4ade80')
+      .setTimestamp();
+
+    try {
+      await member.user.send({ embeds: [welcomeEmbed] });
+    } catch (error) {
+      console.warn(`Could not send welcome DM to ${member.user.tag}`, error);
+
+      const channels = await member.guild.channels.fetch();
+      const generalChannel = channels.find(channel => 
+        channel?.isTextBased() && 
+        channel.name.toLowerCase().includes('general')
+      );
+
+      if (generalChannel?.isTextBased()) {
+        await generalChannel.send({ 
+          content: `${member.user}`,
+          embeds: [welcomeEmbed] 
+        });
+      }
+    }
+
+  } catch (error) {
+    console.error('Error sending welcome message:', error);
+  }
+});
+
 client.once(Events.ClientReady, async (c) => {
   console.log(`Discord bot is ready! Logged in as ${c.user.tag}`);
 
