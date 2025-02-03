@@ -6,17 +6,38 @@ import { PlayerStatsForm } from "@/components/stats/player-stats-form";
 import { GoalieStatsForm } from "@/components/stats/goalie-stats-form";
 import { StatsHistory } from "@/components/stats/stats-history";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TeamStatsForm } from "@/components/stats/team-stats-form";
+
+interface Team {
+  id: number;
+  name: string;
+}
+
+interface Player {
+  id: number;
+  username: string;
+  discordId: string;
+}
 
 export default function StatsTracking() {
-  const [activeTab, setActiveTab] = useState("player");
+  const [activeTab, setActiveTab] = useState<"team" | "player" | "goalie">("team");
+  const [selectedTeam, setSelectedTeam] = useState<string>("");
   const { toast } = useToast();
 
-  const { data: players, isLoading: playersLoading } = useQuery<{
-    id: number;
-    username: string;
-    discordId: string;
-  }[]>({
-    queryKey: ['/api/players'],
+  const { data: teams, isLoading: teamsLoading } = useQuery<Team[]>({
+    queryKey: ['/api/teams'],
+  });
+
+  const { data: players, isLoading: playersLoading } = useQuery<Player[]>({
+    queryKey: ['/api/teams/players', selectedTeam],
+    enabled: !!selectedTeam,
   });
 
   return (
@@ -25,19 +46,56 @@ export default function StatsTracking() {
         <Card>
           <CardContent className="pt-6">
             <h1 className="text-3xl font-bold text-gray-900 mb-4">Stats Tracking</h1>
-            
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-8">
+
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold mb-2">Select Team</h2>
+              <Select value={selectedTeam} onValueChange={setSelectedTeam}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a team" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teams?.map((team) => (
+                    <SelectItem key={team.id} value={team.id.toString()}>
+                      {team.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "team" | "player" | "goalie")} className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-8">
+                <TabsTrigger value="team">Team Stats</TabsTrigger>
                 <TabsTrigger value="player">Player Stats</TabsTrigger>
                 <TabsTrigger value="goalie">Goalie Stats</TabsTrigger>
               </TabsList>
 
+              <TabsContent value="team">
+                {selectedTeam ? (
+                  <div className="space-y-4">
+                    <h2 className="text-xl font-semibold">Team Statistics</h2>
+                    <TeamStatsForm teamId={selectedTeam} />
+                  </div>
+                ) : (
+                  <p className="text-gray-500">Please select a team first</p>
+                )}
+              </TabsContent>
+
+
               <TabsContent value="player">
-                <PlayerStatsForm players={players} isLoading={playersLoading} />
+                {selectedTeam ? (
+                  <PlayerStatsForm players={players} isLoading={playersLoading} />
+                ) : (
+                  <p className="text-gray-500">Please select a team first</p>
+                )}
               </TabsContent>
 
               <TabsContent value="goalie">
-                <GoalieStatsForm players={players} isLoading={playersLoading} />
+                {selectedTeam ? (
+                  <GoalieStatsForm players={players} isLoading={playersLoading} />
+                ) : (
+                  <p className="text-gray-500">Please select a team first</p>
+                )}
               </TabsContent>
             </Tabs>
 
