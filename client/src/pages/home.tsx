@@ -1,6 +1,11 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { useQuery } from "@tanstack/react-query";
 
+interface ExemptPlayer {
+  username: string;
+  discordId: string;
+}
+
 interface Team {
   id: number;
   name: string;
@@ -8,6 +13,7 @@ interface Team {
   availableCap: number;
   totalSalary: number;
   playerCount: number;
+  exemptPlayers: ExemptPlayer[];
 }
 
 export default function Home() {
@@ -48,6 +54,18 @@ export default function Home() {
                           <li>Salary Cap: ${team.salaryCap?.toLocaleString()}</li>
                           <li>Available Cap: ${team.availableCap?.toLocaleString()}</li>
                           <li>Total Salary: ${team.totalSalary?.toLocaleString()}</li>
+                          <li className="mt-2">
+                            <span className="font-medium">Salary Exempt Players:</span>
+                            {team.exemptPlayers.length > 0 ? (
+                              <ul className="ml-4 list-disc">
+                                {team.exemptPlayers.map(player => (
+                                  <li key={player.discordId}>{player.username}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <span className="ml-2 italic">None</span>
+                            )}
+                          </li>
                         </ul>
                       </CardContent>
                     </Card>
@@ -67,6 +85,7 @@ export default function Home() {
                 <li>Roster Management</li>
                 <li>Player Trading System</li>
                 <li>Waiver Wire Management</li>
+                <li>Salary Cap Exemptions (2 players per team)</li>
               </ul>
 
               <p className="mt-4 text-gray-600">

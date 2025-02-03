@@ -18,6 +18,7 @@ export const players = pgTable("players", {
   username: text("username").notNull(),
   currentTeamId: integer("current_team_id").references(() => teams.id),
   status: text("status").default("free_agent"), // free_agent, signed, waivers
+  salaryExempt: boolean("salary_exempt").default(false),
 });
 
 // Contracts table

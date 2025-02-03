@@ -16,7 +16,11 @@ export function registerRoutes(app: Express): Server {
     try {
       const allTeams = await db.query.teams.findMany({
         with: {
-          players: true,
+          players: {
+            with: {
+              currentTeam: true,
+            },
+          },
         },
       });
 
@@ -27,14 +31,25 @@ export function registerRoutes(app: Express): Server {
             where: eq(contracts.teamId, team.id),
           });
 
-          const totalSalary = activeContracts.reduce((sum, contract) => sum + contract.salary, 0);
+          // Calculate total salary excluding exempt players
+          const totalSalary = activeContracts.reduce((sum, contract) => {
+            const player = team.players.find(p => p.id === contract.playerId);
+            return sum + (player?.salaryExempt ? 0 : contract.salary);
+          }, 0);
+
           const availableCap = team.salaryCap! - totalSalary;
+
+          const exemptPlayers = team.players.filter(player => player.salaryExempt);
 
           return {
             ...team,
             totalSalary,
             availableCap,
             playerCount: team.players.length,
+            exemptPlayers: exemptPlayers.map(p => ({ 
+              username: p.username,
+              discordId: p.discordId 
+            })),
           };
         })
       );
