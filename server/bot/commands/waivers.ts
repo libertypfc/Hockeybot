@@ -97,45 +97,22 @@ export const WaiversCommands = [
       }
     },
   },
-    {
+  {
     data: new SlashCommandBuilder()
       .setName('pingwaivers')
-      .setDescription('Test waiver wire notification pings')
+      .setDescription('Test bot latency')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      await interaction.deferReply();
-
       try {
-        const guild = interaction.guild;
-
-        if (!guild) {
-          return interaction.editReply('This command must be used in a server.');
-        }
-
-        // Get waiver notification settings
-        const settings = await db.query.waiverSettings.findFirst({
-          where: eq(waiverSettings.guildId, guild.id),
-        });
-
-        if (!settings) {
-          return interaction.editReply('Waiver wire notification settings not found. Use /setupwaivers first.');
-        }
-
-        // Get the notification channel
-        const notificationChannel = await guild.channels.fetch(settings.notificationChannelId);
-        if (!notificationChannel?.isTextBased()) {
-          return interaction.editReply('Notification channel not found or is not a text channel.');
-        }
-
-        // Send a test ping
-        await notificationChannel.send(`<@&${settings.scoutRoleId}> <@&${settings.gmRoleId}> Test ping for waiver wire notifications.`);
-        await interaction.editReply('Test ping sent to notification channel.');
+        const sent = await interaction.reply({ content: 'Pinging...', fetchReply: true });
+        const latency = sent.createdTimestamp - interaction.createdTimestamp;
+        await interaction.editReply(`🏓 Pong! Bot latency: ${latency}ms`);
 
       } catch (error) {
-        console.error('Error sending test ping:', error);
+        console.error('Error in ping command:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        await interaction.editReply(`Failed to send test ping: ${errorMessage}`);
+        await interaction.reply(`Failed to get ping: ${errorMessage}`);
       }
     },
   },
@@ -188,9 +165,9 @@ export const WaiversCommands = [
 
       // Update player status
       await db.update(players)
-        .set({ 
+        .set({
           currentTeamId: null,
-          status: 'waivers' 
+          status: 'waivers'
         })
         .where(eq(players.id, player.id));
 
