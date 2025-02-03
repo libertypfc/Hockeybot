@@ -17,6 +17,7 @@ export const players = pgTable("players", {
   currentTeamId: integer("current_team_id").references(() => teams.id),
   status: text("status").default("free_agent"),
   salaryExempt: boolean("salary_exempt").default(false),
+  welcomeMessageSent: boolean("welcome_message_sent").default(false),
 });
 
 export const contracts = pgTable("contracts", {
@@ -28,6 +29,13 @@ export const contracts = pgTable("contracts", {
   startDate: timestamp("start_date").notNull(),
   endDate: timestamp("end_date").notNull(),
   status: text("status").default("pending"),
+  metadata: text("metadata"),
+});
+
+export const guildSettings = pgTable("guild_settings", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").unique().notNull(),
+  welcomeChannelId: text("welcome_channel_id").notNull(),
 });
 
 export const waivers = pgTable("waivers", {
@@ -136,11 +144,14 @@ export const selectPlayerStatsSchema = createSelectSchema(playerStats);
 export const insertGoalieStatsSchema = createInsertSchema(goalieStats);
 export const selectGoalieStatsSchema = createSelectSchema(goalieStats);
 
+export const insertGuildSettingsSchema = createInsertSchema(guildSettings);
+export const selectGuildSettingsSchema = createSelectSchema(guildSettings);
+
 export type PlayerStats = typeof playerStats.$inferSelect;
 export type GoalieStats = typeof goalieStats.$inferSelect;
-
 export type Team = typeof teams.$inferSelect;
 export type Player = typeof players.$inferSelect;
 export type Contract = typeof contracts.$inferSelect;
 export type Waiver = typeof waivers.$inferSelect;
 export type WaiverSettings = typeof waiverSettings.$inferSelect;
+export type GuildSettings = typeof guildSettings.$inferSelect;

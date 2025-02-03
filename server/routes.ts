@@ -16,11 +16,7 @@ export function registerRoutes(app: Express): Server {
     try {
       const allTeams = await db.query.teams.findMany({
         with: {
-          players: {
-            with: {
-              currentTeam: true,
-            },
-          },
+          players: true,
         },
       });
 
@@ -83,11 +79,8 @@ export function registerRoutes(app: Express): Server {
   app.get('/api/teams/:teamId/roster', async (req, res) => {
     try {
       const teamId = parseInt(req.params.teamId);
-      const players = await db.query.players.findMany({
+      const teamPlayers = await db.query.players.findMany({
         where: eq(players.currentTeamId, teamId),
-        with: {
-          currentTeam: true,
-        },
       });
 
       const activeContracts = await db.query.contracts.findMany({
@@ -97,7 +90,7 @@ export function registerRoutes(app: Express): Server {
         ),
       });
 
-      const roster = players.map(player => {
+      const roster = teamPlayers.map(player => {
         const contract = activeContracts.find(c => c.playerId === player.id);
         return {
           id: player.id,
@@ -122,7 +115,7 @@ export function registerRoutes(app: Express): Server {
       const playerId = parseInt(req.params.playerId);
 
       // Get current exempt players count
-      const exemptCount = await db.query.players.count({
+      const exemptPlayersCount = await db.query.players.findMany({
         where: and(
           eq(players.currentTeamId, teamId),
           eq(players.salaryExempt, true)
@@ -138,7 +131,7 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).json({ error: 'Player not found' });
       }
 
-      if (exemptCount >= 2 && !player.salaryExempt) {
+      if (exemptPlayersCount.length >= 2 && !player.salaryExempt) {
         return res.status(400).json({ error: 'Team already has 2 salary exempt players' });
       }
 

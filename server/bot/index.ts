@@ -1,6 +1,6 @@
-import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChannel, DMChannel, ChannelType } from 'discord.js';
 import { db } from '@db';
-import { players, contracts, teams } from '@db/schema';
+import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and, lt } from 'drizzle-orm';
 import { registerCommands } from './commands';
 
@@ -54,19 +54,22 @@ async function checkExpiredContracts() {
 
           if (metadata.offerMessageId) {
             try {
-              const channels = await client.channels.fetch();
-              for (const [, channel] of channels) {
-                if (channel?.isTextBased()) {
-                  try {
-                    const message = await channel.messages.fetch(metadata.offerMessageId);
-                    if (message) {
-                      const expiredEmbed = EmbedBuilder.from(message.embeds[0])
-                        .setDescription(`⏰ This contract offer has expired`);
-                      await message.edit({ embeds: [expiredEmbed] });
-                      break;
+              // Try to find the message in all available channels
+              const channels = await client.guilds.cache.first()?.channels.fetch();
+              if (channels) {
+                for (const [, channel] of channels) {
+                  if (channel?.type === ChannelType.GuildText) {
+                    try {
+                      const message = await channel.messages.fetch(metadata.offerMessageId);
+                      if (message) {
+                        const expiredEmbed = EmbedBuilder.from(message.embeds[0])
+                          .setDescription(`⏰ This contract offer has expired`);
+                        await message.edit({ embeds: [expiredEmbed] });
+                        break;
+                      }
+                    } catch (e) {
+                      continue;
                     }
-                  } catch (e) {
-                    continue;
                   }
                 }
               }
@@ -106,24 +109,37 @@ client.on(Events.GuildMemberAdd, async (member) => {
       .setTimestamp();
 
     try {
+      // Try to send DM first
       await member.user.send({ embeds: [welcomeEmbed] });
     } catch (error) {
       console.warn(`Could not send welcome DM to ${member.user.tag}`, error);
 
-      const channels = await member.guild.channels.fetch();
-      const generalChannel = channels.find(channel => 
-        channel?.isTextBased() && 
-        channel.name.toLowerCase().includes('general')
-      );
+      // Get configured welcome channel
+      const settings = await db.query.guildSettings.findFirst({
+        where: eq(guildSettings.guildId, member.guild.id),
+      });
 
-      if (generalChannel?.isTextBased()) {
-        await generalChannel.send({ 
+      let welcomeChannel;
+      if (settings?.welcomeChannelId) {
+        welcomeChannel = await member.guild.channels.fetch(settings.welcomeChannelId);
+      }
+
+      // Fallback to finding a general channel if no channel is configured
+      if (!welcomeChannel || welcomeChannel.type !== ChannelType.GuildText) {
+        const channels = await member.guild.channels.fetch();
+        welcomeChannel = channels.find(channel => 
+          channel.type === ChannelType.GuildText && 
+          channel.name.toLowerCase().includes('general')
+        );
+      }
+
+      if (welcomeChannel && welcomeChannel.type === ChannelType.GuildText) {
+        await welcomeChannel.send({ 
           content: `${member.user}`,
           embeds: [welcomeEmbed] 
         });
       }
     }
-
   } catch (error) {
     console.error('Error sending welcome message:', error);
   }
