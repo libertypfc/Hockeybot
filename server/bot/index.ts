@@ -45,6 +45,32 @@ client.once(Events.ClientReady, async (c) => {
   }
 });
 
+// Handle mentions and messages
+client.on(Events.MessageCreate, async (message) => {
+  // Ignore messages from bots to prevent loops
+  if (message.author.bot) return;
+
+  try {
+    // Check if the bot was mentioned
+    if (message.mentions.has(client.user!)) {
+      const embed = new EmbedBuilder()
+        .setTitle('👋 Hello!')
+        .setDescription('I\'m your Hockey League Management Bot! Here are some things I can help you with:')
+        .addFields(
+          { name: 'Team Management', value: '/createteam, /teaminfo, /removeplayer' },
+          { name: 'Player Management', value: '/trade, /release, /exemptplayer' },
+          { name: 'Contracts', value: '/offer elc, /offer custom' }
+        )
+        .setFooter({ text: 'Use / to see all available commands' })
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    }
+  } catch (error) {
+    console.error('Error handling message:', error);
+  }
+});
+
 // Handle contract acceptance via reactions
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   // Ignore bot's own reactions
