@@ -31,7 +31,7 @@ export const WaiversCommands = [
         if (!scoutRole) {
           scoutRole = await guild.roles.create({
             name: 'Waiver Wire Scout',
-            color: 'BLUE',
+            color: '#3498db', // Using hex code for blue
             reason: 'Role for waiver wire notifications',
           });
         }
@@ -41,7 +41,7 @@ export const WaiversCommands = [
         if (!gmRole) {
           gmRole = await guild.roles.create({
             name: 'GM',
-            color: 'GREEN',
+            color: '#2ecc71', // Using hex code for green
             reason: 'Role for waiver wire notifications',
           });
         }
