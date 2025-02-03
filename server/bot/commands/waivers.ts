@@ -100,19 +100,51 @@ export const WaiversCommands = [
   {
     data: new SlashCommandBuilder()
       .setName('pingwaivers')
-      .setDescription('Test bot latency')
+      .setDescription('Test waiver wire notification system')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
       try {
-        const sent = await interaction.reply({ content: 'Pinging...', fetchReply: true });
-        const latency = sent.createdTimestamp - interaction.createdTimestamp;
-        await interaction.editReply(`🏓 Pong! Bot latency: ${latency}ms`);
+        const guild = interaction.guild;
+
+        if (!guild) {
+          return interaction.editReply('This command must be used in a server.');
+        }
+
+        // Get waiver notification settings
+        const settings = await db.query.waiverSettings.findFirst({
+          where: eq(waiverSettings.guildId, guild.id),
+        });
+
+        if (!settings) {
+          return interaction.editReply('Waiver wire notification settings not found. Use /setupwaivers first.');
+        }
+
+        // Get the notification channel
+        const notificationChannel = await guild.channels.fetch(settings.notificationChannelId);
+        if (!notificationChannel?.isTextBased()) {
+          return interaction.editReply('Notification channel not found or is not a text channel.');
+        }
+
+        // Send a test notification
+        const testEmbed = new EmbedBuilder()
+          .setTitle('🏒 Waiver Wire Notification Test')
+          .setDescription('This is a test of the waiver wire notification system.')
+          .setTimestamp();
+
+        await notificationChannel.send({
+          content: `**🚨 Test Notification**\n<@&${settings.scoutRoleId}> <@&${settings.gmRoleId}>\nThis is a test of the waiver wire notification system.`,
+          embeds: [testEmbed],
+        });
+
+        await interaction.editReply('Test notification sent to the configured channel.');
 
       } catch (error) {
-        console.error('Error in ping command:', error);
+        console.error('Error sending test notification:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        await interaction.reply(`Failed to get ping: ${errorMessage}`);
+        await interaction.editReply(`Failed to send test notification: ${errorMessage}`);
       }
     },
   },
