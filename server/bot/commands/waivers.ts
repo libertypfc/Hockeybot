@@ -1,7 +1,7 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, Role, ChannelType, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, ChannelType, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { db } from '@db';
 import { players, waivers, waiverSettings } from '@db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export const WaiversCommands = [
   {
@@ -13,6 +13,14 @@ export const WaiversCommands = [
           .setDescription('Channel for waiver wire notifications')
           .addChannelTypes(ChannelType.GuildText)
           .setRequired(true))
+      .addRoleOption(option =>
+        option.setName('scout_role')
+          .setDescription('Role to be notified of waiver wire activity (Scouts)')
+          .setRequired(true))
+      .addRoleOption(option =>
+        option.setName('gm_role')
+          .setDescription('Role to be notified of waiver wire activity (GMs)')
+          .setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction: ChatInputCommandInteraction) {
@@ -20,30 +28,12 @@ export const WaiversCommands = [
 
       try {
         const channel = interaction.options.getChannel('channel', true);
+        const scoutRole = interaction.options.getRole('scout_role', true);
+        const gmRole = interaction.options.getRole('gm_role', true);
         const guild = interaction.guild;
 
         if (!guild) {
           return interaction.editReply('This command must be used in a server.');
-        }
-
-        // Create or get Scout role
-        let scoutRole = guild.roles.cache.find(role => role.name === 'Waiver Wire Scout');
-        if (!scoutRole) {
-          scoutRole = await guild.roles.create({
-            name: 'Waiver Wire Scout',
-            color: '#3498db', // Using hex code for blue
-            reason: 'Role for waiver wire notifications',
-          });
-        }
-
-        // Create or get GM role
-        let gmRole = guild.roles.cache.find(role => role.name === 'GM');
-        if (!gmRole) {
-          gmRole = await guild.roles.create({
-            name: 'GM',
-            color: '#2ecc71', // Using hex code for green
-            reason: 'Role for waiver wire notifications',
-          });
         }
 
         // Save or update settings
@@ -66,16 +56,44 @@ export const WaiversCommands = [
         await interaction.editReply({
           content: `Waiver wire notification system has been set up:\n` +
             `📢 Notifications will be sent to ${channel}\n` +
-            `👥 Notification roles created/configured:\n` +
-            `• ${scoutRole} - Waiver Wire Scout\n` +
-            `• ${gmRole} - GM\n\n` +
-            `Users can be assigned these roles to receive notifications when players hit waivers.`,
+            `👥 Notification roles configured:\n` +
+            `• ${scoutRole} - Scout notifications\n` +
+            `• ${gmRole} - GM notifications\n`,
         });
 
       } catch (error) {
         console.error('Error setting up waiver system:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
         await interaction.editReply(`Failed to set up waiver system: ${errorMessage}`);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('clearwaivers')
+      .setDescription('Remove waiver wire notification settings')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const guild = interaction.guild;
+
+        if (!guild) {
+          return interaction.editReply('This command must be used in a server.');
+        }
+
+        // Delete settings
+        await db.delete(waiverSettings)
+          .where(eq(waiverSettings.guildId, guild.id));
+
+        await interaction.editReply('Waiver wire notification settings have been cleared.');
+
+      } catch (error) {
+        console.error('Error clearing waiver settings:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to clear waiver settings: ${errorMessage}`);
       }
     },
   },
@@ -119,7 +137,7 @@ export const WaiversCommands = [
       // Remove team role
       const member = await interaction.guild?.members.fetch(user.id);
       const teamRole = interaction.guild?.roles.cache.find(
-        (role: Role) => role.name === player.currentTeam?.name
+        role => role.name === player.currentTeam?.name
       );
 
       if (teamRole && member) {
