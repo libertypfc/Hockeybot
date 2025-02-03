@@ -127,6 +127,25 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         .setDescription(`✅ Contract accepted by ${user}`);
       await message.edit({ embeds: [updatedEmbed] });
 
+      // Create a new announcement message
+      const announcementEmbed = new EmbedBuilder()
+        .setTitle('🎉 Contract Signing Announcement')
+        .setDescription(`**${user}** has signed with **${pendingContract.team.name}**!`)
+        .addFields(
+          { name: 'Contract Details', value: 
+            `• Salary: $${pendingContract.salary.toLocaleString()}\n` +
+            `• Length: ${pendingContract.lengthInDays} days\n` +
+            `• Status: Active`
+          },
+          { name: 'Team Cap Space', value: 
+            `$${(pendingContract.team.availableCap! - pendingContract.salary).toLocaleString()} remaining`
+          }
+        )
+        .setTimestamp();
+
+      // Send the announcement in the same channel
+      await message.channel.send({ embeds: [announcementEmbed] });
+
     } else if (reaction.emoji.name === '❌') {
       // Decline contract
       await db.update(contracts)
