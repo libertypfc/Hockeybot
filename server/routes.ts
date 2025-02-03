@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { startBot } from './bot';
 import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
@@ -18,14 +18,20 @@ export function registerRoutes(app: Express): Server {
       const allTeams = await db.query.teams.findMany();
 
       // Get all players with their team affiliations
-      const allPlayers = await db.query.players.findMany({
-        where: eq(players.status, 'signed'),
-      });
+      const allPlayers = await db.select({
+        id: players.id,
+        username: players.username,
+        discordId: players.discordId,
+        currentTeamId: players.currentTeamId,
+        salaryExempt: players.salaryExempt,
+      })
+      .from(players)
+      .where(eq(players.status, 'signed'));
 
       // Get all active contracts
-      const activeContracts = await db.query.contracts.findMany({
-        where: eq(contracts.status, 'active'),
-      });
+      const activeContracts = await db.select()
+        .from(contracts)
+        .where(eq(contracts.status, 'active'));
 
       // Calculate team details
       const teamsWithDetails = allTeams.map(team => {
@@ -69,7 +75,7 @@ export function registerRoutes(app: Express): Server {
         discordId: players.discordId,
       })
       .from(players)
-      .orderBy(asc(players.username));
+      .where(eq(players.status, 'signed'));
 
       res.json(allPlayers);
     } catch (error) {
@@ -84,17 +90,22 @@ export function registerRoutes(app: Express): Server {
       const teamId = parseInt(req.params.teamId);
 
       // Get players on this team
-      const teamPlayers = await db.query.players.findMany({
-        where: eq(players.currentTeamId, teamId),
-      });
+      const teamPlayers = await db.select({
+        id: players.id,
+        username: players.username,
+        discordId: players.discordId,
+        salaryExempt: players.salaryExempt,
+      })
+      .from(players)
+      .where(eq(players.currentTeamId, teamId));
 
       // Get active contracts for this team
-      const activeContracts = await db.query.contracts.findMany({
-        where: and(
+      const activeContracts = await db.select()
+        .from(contracts)
+        .where(and(
           eq(contracts.teamId, teamId),
           eq(contracts.status, 'active')
-        ),
-      });
+        ));
 
       const roster = teamPlayers.map(player => {
         const contract = activeContracts.find(c => c.playerId === player.id);
