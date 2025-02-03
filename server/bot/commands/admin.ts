@@ -6,6 +6,34 @@ import { eq, lt, gt } from 'drizzle-orm';
 export const AdminCommands = [
   {
     data: new SlashCommandBuilder()
+      .setName('ping')
+      .setDescription('Test bot connection and get response time'),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      const sent = await interaction.reply({ content: 'Pinging...', fetchReply: true });
+      const roundtripLatency = sent.createdTimestamp - interaction.createdTimestamp;
+      const wsLatency = interaction.client.ws.ping;
+      const uptime = Math.floor(interaction.client.uptime! / 1000); // Convert to seconds
+
+      const hours = Math.floor(uptime / 3600);
+      const minutes = Math.floor((uptime % 3600) / 60);
+      const seconds = uptime % 60;
+
+      const embed = new EmbedBuilder()
+        .setTitle('🏓 Pong!')
+        .addFields(
+          { name: 'Bot Latency', value: `${roundtripLatency}ms`, inline: true },
+          { name: 'WebSocket Latency', value: `${wsLatency}ms`, inline: true },
+          { name: 'Uptime', value: `${hours}h ${minutes}m ${seconds}s`, inline: true }
+        )
+        .setColor(roundtripLatency < 200 ? '#00ff00' : roundtripLatency < 500 ? '#ffff00' : '#ff0000')
+        .setTimestamp();
+
+      await interaction.editReply({ content: null, embeds: [embed] });
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
       .setName('setwelcomechannel')
       .setDescription('Set the channel for welcome messages')
       .addChannelOption(option =>
