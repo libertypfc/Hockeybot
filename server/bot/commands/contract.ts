@@ -116,14 +116,22 @@ export const ContractCommands = [
         )
         .setFooter({ text: '✅ to accept, ❌ to decline' });
 
-      const message = await interaction.reply({ 
+      // First send a direct notification
+      const notificationContent = `🏒 Hey ${user}! You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!\n` +
+        `Details:\n` +
+        `• Salary: $${salary.toLocaleString()}\n` +
+        `• Length: ${lengthDisplay}\n` +
+        `Please check the offer below and respond with ✅ to accept or ❌ to decline.`;
+
+      await interaction.reply({ 
+        content: notificationContent,
         embeds: [embed],
         fetchReply: true,
+      }).then(async message => {
+        // Add reactions for acceptance and denial
+        await message.react('✅');
+        await message.react('❌');
       });
-
-      // Add reactions for acceptance and denial
-      await message.react('✅');
-      await message.react('❌');
     },
   },
 ];
