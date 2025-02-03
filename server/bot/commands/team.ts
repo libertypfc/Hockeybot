@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
-import { teams } from '@db/schema';
+import { teams, players, contracts } from '@db/schema';
 import { eq } from 'drizzle-orm';
 
 export const TeamCommands = [
@@ -40,7 +40,7 @@ export const TeamCommands = [
         ] as const;
 
         // Create all standard channels in parallel
-        await Promise.all(channels.map(([name, type]) => 
+        await Promise.all(channels.map(([name, type]) =>
           interaction.guild!.channels.create({
             name,
             type,
@@ -149,6 +149,56 @@ export const TeamCommands = [
         console.error('Error deleting team:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
         await interaction.editReply(`Failed to delete team: ${errorMessage}`);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('clearteam')
+      .setDescription('Remove a team and all its data from the database')
+      .addStringOption(option =>
+        option.setName('name')
+          .setDescription('The name of the team to clear')
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const teamName = interaction.options.getString('name', true);
+
+        // Get team from database
+        const team = await db.query.teams.findFirst({
+          where: eq(teams.name, teamName)
+        });
+
+        if (!team) {
+          return interaction.editReply(`Team "${teamName}" not found in database`);
+        }
+
+        // Update all players on this team to free agents
+        await db.update(players)
+          .set({
+            currentTeamId: null,
+            status: 'free_agent'
+          })
+          .where(eq(players.currentTeamId, team.id));
+
+        // Delete all contracts associated with this team
+        await db.delete(contracts)
+          .where(eq(contracts.teamId, team.id));
+
+        // Finally, delete the team
+        await db.delete(teams)
+          .where(eq(teams.id, team.id));
+
+        await interaction.editReply(`Team ${teamName} has been cleared from the database. All players have been set to free agents.`);
+
+      } catch (error) {
+        console.error('Error clearing team:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to clear team: ${errorMessage}`);
       }
     },
   },
