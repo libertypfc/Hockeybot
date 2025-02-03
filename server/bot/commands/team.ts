@@ -15,7 +15,6 @@ export const TeamCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      // Defer the reply immediately to prevent timeout
       await interaction.deferReply();
 
       try {
@@ -109,44 +108,89 @@ export const TeamCommands = [
 
       try {
         const teamName = interaction.options.getString('name', true);
+        let errors: string[] = [];
 
-        // Get team from database
+        // First, get team from database
         const team = await db.query.teams.findFirst({
           where: eq(teams.name, teamName)
         });
 
         if (!team) {
-          return interaction.editReply(`Team "${teamName}" not found`);
+          return interaction.editReply(`Team "${teamName}" not found in database`);
         }
 
-        // Delete channels in category
-        const category = await interaction.guild?.channels.cache.get(team.discordCategoryId);
-        if (category) {
-          // Delete all channels in the category
-          const channelsInCategory = interaction.guild?.channels.cache.filter(
-            channel => channel.parentId === category.id
-          );
-
-          await Promise.all(
-            channelsInCategory?.map(channel => channel.delete()) || []
-          );
-
-          // Delete the category itself
-          await category.delete();
+        // 1. Update all players on this team to free agents
+        try {
+          await db.update(players)
+            .set({
+              currentTeamId: null,
+              status: 'free_agent'
+            })
+            .where(eq(players.currentTeamId, team.id));
+        } catch (error) {
+          errors.push('Failed to update players');
+          console.error('Error updating players:', error);
         }
 
-        // Delete team role
-        const teamRole = interaction.guild?.roles.cache.find(role => role.name === teamName);
-        if (teamRole) {
-          await teamRole.delete();
+        // 2. Delete all contracts associated with this team
+        try {
+          await db.delete(contracts)
+            .where(eq(contracts.teamId, team.id));
+        } catch (error) {
+          errors.push('Failed to delete contracts');
+          console.error('Error deleting contracts:', error);
         }
 
-        // Delete from database
-        await db.delete(teams).where(eq(teams.name, teamName));
+        // 3. Delete Discord elements
+        if (interaction.guild) {
+          // Delete channels in category
+          try {
+            const category = await interaction.guild.channels.cache.get(team.discordCategoryId);
+            if (category) {
+              const channelsInCategory = interaction.guild.channels.cache.filter(
+                channel => channel.parentId === category.id
+              );
 
-        await interaction.editReply(`Team ${teamName} has been successfully deleted with all associated channels and roles.`);
+              await Promise.all(
+                channelsInCategory.map(channel => channel.delete())
+              );
+
+              await category.delete();
+            }
+          } catch (error) {
+            errors.push('Failed to delete some Discord channels');
+            console.error('Error deleting channels:', error);
+          }
+
+          // Delete team role
+          try {
+            const teamRole = interaction.guild.roles.cache.find(role => role.name === teamName);
+            if (teamRole) {
+              await teamRole.delete();
+            }
+          } catch (error) {
+            errors.push('Failed to delete team role');
+            console.error('Error deleting role:', error);
+          }
+        }
+
+        // 4. Finally, delete the team from database
+        try {
+          await db.delete(teams).where(eq(teams.id, team.id));
+        } catch (error) {
+          errors.push('Failed to delete team from database');
+          console.error('Error deleting team from database:', error);
+          throw error; // This is critical, so we throw
+        }
+
+        const successMessage = `Team ${teamName} has been deleted.`;
+        const errorMessage = errors.length > 0 
+          ? `\nWarning: Some operations failed: ${errors.join(', ')}`
+          : '';
+
+        await interaction.editReply(successMessage + errorMessage);
       } catch (error) {
-        console.error('Error deleting team:', error);
+        console.error('Critical error deleting team:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
         await interaction.editReply(`Failed to delete team: ${errorMessage}`);
       }
