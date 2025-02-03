@@ -8,6 +8,7 @@ export const teams = pgTable("teams", {
   discordCategoryId: text("discord_category_id").notNull(),
   salaryCap: integer("salary_cap").default(0),
   availableCap: integer("available_cap").default(0),
+  metadata: text("metadata"),
 });
 
 export const players = pgTable("players", {
