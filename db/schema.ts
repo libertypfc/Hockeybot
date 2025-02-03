@@ -173,6 +173,50 @@ export const selectGuildSettingsSchema = createSelectSchema(guildSettings);
 export const insertTeamStatsSchema = createInsertSchema(teamStats);
 export const selectTeamStatsSchema = createSelectSchema(teamStats);
 
+export const seasons = pgTable("seasons", {
+  id: serial("id").primaryKey(),
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  numberOfWeeks: integer("number_of_weeks").notNull(),
+  status: text("status").default("pending"), // pending, active, completed
+  metadata: text("metadata"),
+});
+
+export const gameSchedule = pgTable("game_schedule", {
+  id: serial("id").primaryKey(),
+  seasonId: integer("season_id").references(() => seasons.id).notNull(),
+  homeTeamId: integer("home_team_id").references(() => teams.id).notNull(),
+  awayTeamId: integer("away_team_id").references(() => teams.id).notNull(),
+  gameDate: timestamp("game_date").notNull(),
+  gameNumber: integer("game_number").notNull(), // 1 or 2 for same-night games
+  status: text("status").default("scheduled"), // scheduled, completed, cancelled
+  homeScore: integer("home_score"),
+  awayScore: integer("away_score"),
+  metadata: text("metadata"),
+});
+
+export const gameScheduleRelations = relations(gameSchedule, ({ one }) => ({
+  season: one(seasons, {
+    fields: [gameSchedule.seasonId],
+    references: [seasons.id],
+  }),
+  homeTeam: one(teams, {
+    fields: [gameSchedule.homeTeamId],
+    references: [teams.id],
+  }),
+  awayTeam: one(teams, {
+    fields: [gameSchedule.awayTeamId],
+    references: [teams.id],
+  }),
+}));
+
+
+export const insertSeasonSchema = createInsertSchema(seasons);
+export const selectSeasonSchema = createSelectSchema(seasons);
+
+export const insertGameScheduleSchema = createInsertSchema(gameSchedule);
+export const selectGameScheduleSchema = createSelectSchema(gameSchedule);
+
 
 export type PlayerStats = typeof playerStats.$inferSelect;
 export type GoalieStats = typeof goalieStats.$inferSelect;
@@ -183,3 +227,5 @@ export type Waiver = typeof waivers.$inferSelect;
 export type WaiverSettings = typeof waiverSettings.$inferSelect;
 export type GuildSettings = typeof guildSettings.$inferSelect;
 export type TeamStats = typeof teamStats.$inferSelect;
+export type Season = typeof seasons.$inferSelect;
+export type GameSchedule = typeof gameSchedule.$inferSelect;
