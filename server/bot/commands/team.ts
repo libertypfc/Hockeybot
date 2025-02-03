@@ -1,7 +1,7 @@
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ComponentType } from 'discord.js';
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ComponentType, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export const TeamCommands = [
   {
@@ -291,6 +291,92 @@ export const TeamCommands = [
         console.error('Error clearing team:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
         await interaction.editReply(`Failed to clear team: ${errorMessage}`);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('teaminfo')
+      .setDescription('Display team information including roster and salary cap')
+      .addRoleOption(option =>
+        option.setName('team')
+          .setDescription('The team to get information about (use @team)')
+          .setRequired(true)),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const teamRole = interaction.options.getRole('team', true);
+
+        // Get team information
+        const team = await db.query.teams.findFirst({
+          where: eq(teams.name, teamRole.name),
+        });
+
+        if (!team) {
+          return interaction.editReply('Team not found in database');
+        }
+
+        // Get all players on the team with their active contracts
+        const teamPlayers = await db.query.players.findMany({
+          where: eq(players.currentTeamId, team.id),
+          with: {
+            currentTeam: true,
+          },
+        });
+
+        // Get active contracts for the team
+        const activeContracts = await db.query.contracts.findMany({
+          where: and(
+            eq(contracts.teamId, team.id),
+            eq(contracts.status, 'active')
+          ),
+        });
+
+        // Calculate total salary
+        const totalSalary = activeContracts.reduce((sum, contract) => sum + contract.salary, 0);
+        const availableCap = team.salaryCap - totalSalary;
+
+        // Create embed for team information
+        const embed = new EmbedBuilder()
+          .setTitle(`${team.name} Team Information`)
+          .setColor('#0099ff')
+          .addFields(
+            { 
+              name: 'Salary Cap Information', 
+              value: 
+                `Total Cap: $${team.salaryCap.toLocaleString()}\n` +
+                `Used Cap: $${totalSalary.toLocaleString()}\n` +
+                `Available Cap: $${availableCap.toLocaleString()}`
+            }
+          );
+
+        // Add roster information
+        if (teamPlayers.length > 0) {
+          const playerList = teamPlayers.map(player => {
+            const playerContract = activeContracts.find(c => c.playerId === player.id);
+            const salary = playerContract ? `$${playerContract.salary.toLocaleString()}` : 'No active contract';
+            return `<@${player.discordId}> - ${salary}`;
+          }).join('\n');
+
+          embed.addFields({ 
+            name: 'Current Roster', 
+            value: playerList || 'No players on roster'
+          });
+        } else {
+          embed.addFields({ 
+            name: 'Current Roster', 
+            value: 'No players on roster'
+          });
+        }
+
+        await interaction.editReply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error('Error displaying team info:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to get team information: ${errorMessage}`);
       }
     },
   },
