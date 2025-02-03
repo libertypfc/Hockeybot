@@ -24,25 +24,56 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
+interface Team {
+  id: number;
+  name: string;
+  salaryCap: number;
+  availableCap: number;
+}
+
+interface TeamStats {
+  wins: number;
+  losses: number;
+  otLosses: number;
+  points: number;
+  goalsFor: number;
+  goalsAgainst: number;
+}
+
+interface Player {
+  id: number;
+  username: string;
+  discordId: string;
+}
+
+interface PlayerStats {
+  hits: number;
+  fow: number;
+  takeaways: number;
+  giveaways: number;
+  shots: number;
+  pim: number;
+}
+
 export default function StatsPage() {
   const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
 
-  const { data: teams, isLoading: teamsLoading } = useQuery({
+  const { data: teams, isLoading: teamsLoading } = useQuery<Team[]>({
     queryKey: ['/api/teams'],
   });
 
-  const { data: teamStats, isLoading: teamStatsLoading } = useQuery({
+  const { data: teamStats, isLoading: teamStatsLoading } = useQuery<TeamStats>({
     queryKey: ['/api/teams/stats', selectedTeam],
     enabled: !!selectedTeam,
   });
 
-  const { data: players, isLoading: playersLoading } = useQuery({
+  const { data: players, isLoading: playersLoading } = useQuery<Player[]>({
     queryKey: ['/api/teams/players', selectedTeam],
     enabled: !!selectedTeam,
   });
 
-  const { data: playerStats, isLoading: playerStatsLoading } = useQuery({
+  const { data: playerStats, isLoading: playerStatsLoading } = useQuery<PlayerStats>({
     queryKey: ['/api/players/stats', selectedPlayer],
     enabled: !!selectedPlayer,
   });
@@ -61,7 +92,7 @@ export default function StatsPage() {
               <SelectValue placeholder="Select a team" />
             </SelectTrigger>
             <SelectContent>
-              {teams?.map((team: any) => (
+              {teams?.map((team) => (
                 <SelectItem key={team.id} value={team.id.toString()}>
                   {team.name}
                 </SelectItem>
@@ -122,7 +153,7 @@ export default function StatsPage() {
                 <SelectValue placeholder="Select a player" />
               </SelectTrigger>
               <SelectContent>
-                {players?.map((player: any) => (
+                {players?.map((player) => (
                   <SelectItem key={player.id} value={player.id.toString()}>
                     {player.username}
                   </SelectItem>
