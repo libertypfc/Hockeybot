@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { startBot } from './bot';
 import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
@@ -58,6 +58,24 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Error fetching teams:', error);
       res.status(500).json({ error: 'Failed to fetch teams' });
+    }
+  });
+
+  // New endpoint to get all players
+  app.get('/api/players', async (_req, res) => {
+    try {
+      const allPlayers = await db.select({
+        id: players.id,
+        username: players.username,
+        discordId: players.discordId,
+      })
+      .from(players)
+      .orderBy(asc(players.username));
+
+      res.json(allPlayers);
+    } catch (error) {
+      console.error('Error fetching players:', error);
+      res.status(500).json({ error: 'Failed to fetch players' });
     }
   });
 
