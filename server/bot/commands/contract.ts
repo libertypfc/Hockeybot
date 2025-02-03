@@ -95,10 +95,12 @@ export const ContractCommands = [
           player = result[0];
         }
 
-        // Create contract
+        // Create contract with expiration time (24 hours from now)
         const startDate = new Date();
         const endDate = new Date();
+        const expirationDate = new Date();
         endDate.setDate(endDate.getDate() + length);
+        expirationDate.setHours(expirationDate.getHours() + 24); // Contract offer expires in 24 hours
 
         await db.insert(contracts).values({
           playerId: player.id,
@@ -107,12 +109,18 @@ export const ContractCommands = [
           lengthInDays: length,
           startDate,
           endDate,
+          status: 'pending',
+          // Add metadata to track offer expiration
+          metadata: JSON.stringify({
+            expiresAt: expirationDate.toISOString(),
+            offerMessageId: '', // Will be updated after sending the message
+          }),
         });
 
         // Create embed for contract offer
         const embed = new EmbedBuilder()
           .setTitle(title)
-          .setDescription(`${user} has been offered a contract by ${teamRole}`)
+          .setDescription(`${user} has been offered a contract by ${teamRole}\nOffer expires <t:${Math.floor(expirationDate.getTime() / 1000)}:R>`)
           .addFields(
             { name: 'Salary', value: `$${salary.toLocaleString()}` },
             { name: 'Length', value: lengthDisplay },
@@ -123,7 +131,10 @@ export const ContractCommands = [
         try {
           const dmEmbed = new EmbedBuilder()
             .setTitle('🏒 New Contract Offer!')
-            .setDescription(`You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!`)
+            .setDescription(
+              `You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!\n` +
+              `Offer expires <t:${Math.floor(expirationDate.getTime() / 1000)}:R>`
+            )
             .addFields(
               { name: 'Team', value: team.name },
               { name: 'Salary', value: `$${salary.toLocaleString()}` },
@@ -134,7 +145,6 @@ export const ContractCommands = [
           await user.send({ embeds: [dmEmbed] });
         } catch (error) {
           console.warn(`Could not send DM to ${user.tag}`, error);
-          // Don't return here, continue with the channel message
         }
 
         // Send the message in the channel and add reactions
@@ -149,6 +159,18 @@ export const ContractCommands = [
             replyMessage.react('✅'),
             replyMessage.react('❌'),
           ]);
+
+          // Update the contract with the message ID for future reference
+          if ('id' in replyMessage) {
+            await db.update(contracts)
+              .set({
+                metadata: JSON.stringify({
+                  expiresAt: expirationDate.toISOString(),
+                  offerMessageId: replyMessage.id,
+                }),
+              })
+              .where(eq(contracts.id, player.id));
+          }
         }
 
       } catch (error) {

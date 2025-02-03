@@ -1,10 +1,9 @@
 import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lt } from 'drizzle-orm';
 import { registerCommands } from './commands';
 
-// Extend the Client type to include commands
 declare module 'discord.js' {
   interface Client {
     commands: Collection<string, any>;
@@ -28,30 +27,83 @@ const client = new Client({
   ],
 });
 
-// Initialize the commands collection
 client.commands = new Collection();
+
+async function checkExpiredContracts() {
+  try {
+    const now = new Date();
+
+    const pendingContracts = await db.query.contracts.findMany({
+      where: eq(contracts.status, 'pending'),
+      with: {
+        player: true,
+        team: true,
+      },
+    });
+
+    for (const contract of pendingContracts) {
+      try {
+        const metadata = JSON.parse(contract.metadata || '{}');
+        if (!metadata.expiresAt) continue;
+
+        const expirationDate = new Date(metadata.expiresAt);
+        if (now > expirationDate) {
+          await db.update(contracts)
+            .set({ status: 'expired' })
+            .where(eq(contracts.id, contract.id));
+
+          if (metadata.offerMessageId) {
+            try {
+              const channels = await client.channels.fetch();
+              for (const [, channel] of channels) {
+                if (channel?.isTextBased()) {
+                  try {
+                    const message = await channel.messages.fetch(metadata.offerMessageId);
+                    if (message) {
+                      const expiredEmbed = EmbedBuilder.from(message.embeds[0])
+                        .setDescription(`⏰ This contract offer has expired`);
+                      await message.edit({ embeds: [expiredEmbed] });
+                      break;
+                    }
+                  } catch (e) {
+                    continue;
+                  }
+                }
+              }
+            } catch (error) {
+              console.error('Error updating expired contract message:', error);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error processing contract:', error);
+        continue;
+      }
+    }
+  } catch (error) {
+    console.error('Error checking expired contracts:', error);
+  }
+}
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`Discord bot is ready! Logged in as ${c.user.tag}`);
 
-  // Wait a short time to ensure guilds are cached
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   try {
     await registerCommands(client);
     console.log('All commands registered successfully!');
+
+    setInterval(checkExpiredContracts, 5 * 60 * 1000);
   } catch (error) {
     console.error('Failed to register commands:', error);
   }
 });
 
-// Handle mentions and messages
 client.on(Events.MessageCreate, async (message) => {
-  // Ignore messages from bots to prevent loops
   if (message.author.bot) return;
 
   try {
-    // Check if the bot was mentioned
     if (message.mentions.has(client.user!)) {
       const embed = new EmbedBuilder()
         .setTitle('👋 Hello!')
@@ -71,21 +123,16 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// Handle contract acceptance via reactions
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  // Ignore bot's own reactions
   if (user.bot) return;
 
   try {
-    // Only process checkmark and x reactions
     if (reaction.emoji.name !== '✅' && reaction.emoji.name !== '❌') return;
 
     const message = reaction.message;
 
-    // Check if this is a contract offer message
     if (!message.embeds[0]?.title?.includes('Contract Offer')) return;
 
-    // Find the pending contract for this player
     const player = await db.query.players.findFirst({
       where: eq(players.discordId, user.id),
       with: {
@@ -98,7 +145,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       return;
     }
 
-    // Find the pending contract
     const pendingContract = await db.query.contracts.findFirst({
       where: and(
         eq(contracts.playerId, player.id),
@@ -115,19 +161,16 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     }
 
     if (reaction.emoji.name === '✅') {
-      // Accept contract
       await db.update(contracts)
         .set({ status: 'active' })
         .where(eq(contracts.id, pendingContract.id));
 
-      // Update team's available cap space
       await db.update(teams)
         .set({ 
           availableCap: pendingContract.team.availableCap! - pendingContract.salary 
         })
         .where(eq(teams.id, pendingContract.team.id));
 
-      // Update player's team and status
       await db.update(players)
         .set({ 
           currentTeamId: pendingContract.team.id,
@@ -135,7 +178,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         })
         .where(eq(players.id, player.id));
 
-      // Add team role to player
       const guild = message.guild;
       if (guild) {
         const member = await guild.members.fetch(user.id);
@@ -148,12 +190,10 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         }
       }
 
-      // Update the contract offer message
       const updatedEmbed = EmbedBuilder.from(message.embeds[0])
         .setDescription(`✅ Contract accepted by ${user}`);
       await message.edit({ embeds: [updatedEmbed] });
 
-      // Create a new announcement message
       const announcementEmbed = new EmbedBuilder()
         .setTitle('🎉 Contract Signing Announcement')
         .setDescription(`**${user}** has signed with **${pendingContract.team.name}**!`)
@@ -169,16 +209,13 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         )
         .setTimestamp();
 
-      // Send the announcement in the same channel
       await message.channel.send({ embeds: [announcementEmbed] });
 
     } else if (reaction.emoji.name === '❌') {
-      // Decline contract
       await db.update(contracts)
         .set({ status: 'declined' })
         .where(eq(contracts.id, pendingContract.id));
 
-      // Update the contract offer message
       const updatedEmbed = EmbedBuilder.from(message.embeds[0])
         .setDescription(`❌ Contract declined by ${user}`);
       await message.edit({ embeds: [updatedEmbed] });
