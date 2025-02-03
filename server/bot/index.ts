@@ -15,20 +15,117 @@ if (!process.env.DISCORD_TOKEN) {
   throw new Error('DISCORD_TOKEN environment variable is required');
 }
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildPresences,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildVoiceStates,
-  ],
-});
+class ReliableDiscordClient extends Client {
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 10;
+  private baseDelay: number = 1000;
+  private heartbeatInterval?: NodeJS.Timeout;
+  private isShuttingDown: boolean = false;
 
-client.commands = new Collection();
+  constructor() {
+    super({
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildPresences,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildVoiceStates,
+      ],
+    });
+
+    this.commands = new Collection();
+
+    // Set up event handlers for connection management
+    this.on('error', this.handleError.bind(this));
+    this.on('disconnect', this.handleDisconnect.bind(this));
+    this.on('reconnecting', () => console.log('Bot is reconnecting...'));
+
+    // Handle process termination
+    process.on('SIGINT', () => this.handleShutdown());
+    process.on('SIGTERM', () => this.handleShutdown());
+  }
+
+  private async handleError(error: Error) {
+    console.error('Bot encountered an error:', error);
+    if (!this.isShuttingDown) {
+      await this.attemptReconnect();
+    }
+  }
+
+  private async handleDisconnect() {
+    console.log('Bot disconnected from Discord');
+    if (!this.isShuttingDown) {
+      await this.attemptReconnect();
+    }
+  }
+
+  private async attemptReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('Maximum reconnection attempts reached. Please check the bot\'s token and Discord\'s status.');
+      return;
+    }
+
+    const delay = this.baseDelay * Math.pow(2, this.reconnectAttempts);
+    console.log(`Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    try {
+      await this.login(process.env.DISCORD_TOKEN);
+      this.reconnectAttempts = 0; // Reset counter on successful reconnection
+      console.log('Successfully reconnected to Discord!');
+    } catch (error) {
+      console.error('Reconnection attempt failed:', error);
+      this.reconnectAttempts++;
+      await this.attemptReconnect();
+    }
+  }
+
+  private async handleShutdown() {
+    console.log('Shutting down bot gracefully...');
+    this.isShuttingDown = true;
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+
+    try {
+      // Perform cleanup
+      await this.destroy();
+      console.log('Bot shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      console.error('Error during shutdown:', error);
+      process.exit(1);
+    }
+  }
+
+  private startHeartbeat() {
+    // Check connection status every minute
+    this.heartbeatInterval = setInterval(() => {
+      if (!this.isReady()) {
+        console.log('Bot heartbeat check failed, attempting to reconnect...');
+        this.attemptReconnect();
+      }
+    }, 60000);
+  }
+
+  async start() {
+    try {
+      await this.login(process.env.DISCORD_TOKEN);
+      this.startHeartbeat();
+      console.log('Bot successfully started and connected!');
+    } catch (error) {
+      console.error('Failed to start the bot:', error);
+      await this.attemptReconnect();
+    }
+  }
+}
+
+const client = new ReliableDiscordClient();
 
 async function checkExpiredContracts() {
   try {
@@ -128,16 +225,16 @@ client.on(Events.GuildMemberAdd, async (member) => {
       // Fallback to finding a general channel if no channel is configured
       if (!welcomeChannel || welcomeChannel.type !== ChannelType.GuildText) {
         const channels = await member.guild.channels.fetch();
-        welcomeChannel = channels.find(channel => 
-          channel.type === ChannelType.GuildText && 
+        welcomeChannel = channels.find(channel =>
+          channel.type === ChannelType.GuildText &&
           channel.name.toLowerCase().includes('general')
         );
       }
 
       if (welcomeChannel && welcomeChannel.type === ChannelType.GuildText) {
-        await welcomeChannel.send({ 
+        await welcomeChannel.send({
           content: `${member.user}`,
-          embeds: [welcomeEmbed] 
+          embeds: [welcomeEmbed]
         });
       }
     }
@@ -229,13 +326,13 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         .where(eq(contracts.id, pendingContract.id));
 
       await db.update(teams)
-        .set({ 
-          availableCap: pendingContract.team.availableCap! - pendingContract.salary 
+        .set({
+          availableCap: pendingContract.team.availableCap! - pendingContract.salary
         })
         .where(eq(teams.id, pendingContract.team.id));
 
       await db.update(players)
-        .set({ 
+        .set({
           currentTeamId: pendingContract.team.id,
           status: 'signed'
         })
@@ -261,12 +358,12 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         .setTitle('🎉 Contract Signing Announcement')
         .setDescription(`**${user}** has signed with **${pendingContract.team.name}**!`)
         .addFields(
-          { name: 'Contract Details', value: 
+          { name: 'Contract Details', value:
             `• Salary: $${pendingContract.salary.toLocaleString()}\n` +
             `• Length: ${pendingContract.lengthInDays} days\n` +
             `• Status: Active`
           },
-          { name: 'Team Cap Space', value: 
+          { name: 'Team Cap Space', value:
             `$${(pendingContract.team.availableCap! - pendingContract.salary).toLocaleString()} remaining`
           }
         )
@@ -311,12 +408,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 export function startBot() {
-  client.login(process.env.DISCORD_TOKEN)
-    .then(() => {
-      console.log('Bot successfully logged in!');
-    })
+  client.start()
     .catch((error) => {
-      console.error('Failed to start the bot:', error);
+      console.error('Critical error starting bot:', error);
       throw error;
     });
 }
