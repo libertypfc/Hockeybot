@@ -79,15 +79,17 @@ export const ContractCommands = [
         .addFields(
           { name: 'Salary', value: `$${salary.toLocaleString()}` },
           { name: 'Length', value: `${length} days` },
-        );
+        )
+        .setFooter({ text: '✅ to accept, ❌ to decline' });
 
       const message = await interaction.reply({ 
         embeds: [embed],
         fetchReply: true,
       });
 
-      // Add reaction for acceptance
+      // Add reactions for acceptance and denial
       await message.react('✅');
+      await message.react('❌');
     },
   },
 ];

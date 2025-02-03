@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, Collection } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -51,8 +51,8 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
   if (user.bot) return;
 
   try {
-    // Only process checkmark reactions
-    if (reaction.emoji.name !== '✅') return;
+    // Only process checkmark and x reactions
+    if (reaction.emoji.name !== '✅' && reaction.emoji.name !== '❌') return;
 
     const message = reaction.message;
 
@@ -88,46 +88,59 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       return;
     }
 
-    // Update contract status to active
-    await db.update(contracts)
-      .set({ status: 'active' })
-      .where(eq(contracts.id, pendingContract.id));
+    if (reaction.emoji.name === '✅') {
+      // Accept contract
+      await db.update(contracts)
+        .set({ status: 'active' })
+        .where(eq(contracts.id, pendingContract.id));
 
-    // Update team's available cap space
-    await db.update(teams)
-      .set({ 
-        availableCap: pendingContract.team.availableCap! - pendingContract.salary 
-      })
-      .where(eq(teams.id, pendingContract.team.id));
+      // Update team's available cap space
+      await db.update(teams)
+        .set({ 
+          availableCap: pendingContract.team.availableCap! - pendingContract.salary 
+        })
+        .where(eq(teams.id, pendingContract.team.id));
 
-    // Update player's team and status
-    await db.update(players)
-      .set({ 
-        currentTeamId: pendingContract.team.id,
-        status: 'signed'
-      })
-      .where(eq(players.id, player.id));
+      // Update player's team and status
+      await db.update(players)
+        .set({ 
+          currentTeamId: pendingContract.team.id,
+          status: 'signed'
+        })
+        .where(eq(players.id, player.id));
 
-    // Add team role to player
-    const guild = message.guild;
-    if (guild) {
-      const member = await guild.members.fetch(user.id);
-      const teamRole = guild.roles.cache.find(
-        role => role.name === pendingContract.team.name
-      );
+      // Add team role to player
+      const guild = message.guild;
+      if (guild) {
+        const member = await guild.members.fetch(user.id);
+        const teamRole = guild.roles.cache.find(
+          role => role.name === pendingContract.team.name
+        );
 
-      if (teamRole && member) {
-        await member.roles.add(teamRole);
+        if (teamRole && member) {
+          await member.roles.add(teamRole);
+        }
       }
+
+      // Update the contract offer message
+      const updatedEmbed = EmbedBuilder.from(message.embeds[0])
+        .setDescription(`✅ Contract accepted by ${user}`);
+      await message.edit({ embeds: [updatedEmbed] });
+
+    } else if (reaction.emoji.name === '❌') {
+      // Decline contract
+      await db.update(contracts)
+        .set({ status: 'declined' })
+        .where(eq(contracts.id, pendingContract.id));
+
+      // Update the contract offer message
+      const updatedEmbed = EmbedBuilder.from(message.embeds[0])
+        .setDescription(`❌ Contract declined by ${user}`);
+      await message.edit({ embeds: [updatedEmbed] });
     }
 
-    // Update the contract offer message
-    const updatedEmbed = message.embeds[0];
-    updatedEmbed.data.description = `✅ Contract accepted by ${user}`;
-    await message.edit({ embeds: [updatedEmbed] });
-
   } catch (error) {
-    console.error('Error processing contract acceptance:', error);
+    console.error('Error processing contract reaction:', error);
   }
 });
 
