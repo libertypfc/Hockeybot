@@ -3,6 +3,37 @@ import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 
+async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, playerId: number) {
+  try {
+    const player = await db.select({
+      discordId: players.discordId,
+    })
+    .from(players)
+    .where(eq(players.id, playerId))
+    .then(rows => rows[0]);
+
+    if (!player || !interaction.guild) return;
+
+    const member = await interaction.guild.members.fetch(player.discordId);
+    const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === "Free Agent");
+
+    if (!freeAgentRole) {
+      // Create Free Agent role if it doesn't exist
+      await interaction.guild.roles.create({
+        name: "Free Agent",
+        color: "#808080", // Gray color
+        reason: "Required for free agent players"
+      });
+    }
+
+    if (member && freeAgentRole) {
+      await member.roles.add(freeAgentRole);
+    }
+  } catch (error) {
+    console.error('Error assigning Free Agent role:', error);
+  }
+}
+
 export const TeamCommands = [
   {
     data: new SlashCommandBuilder()
@@ -147,20 +178,25 @@ export const TeamCommands = [
           }
 
           let errors: string[] = [];
+        
+          const teamPlayers = await db.select({
+            id: players.id,
+          })
+          .from(players)
+          .where(eq(players.currentTeamId, teamId));
 
-          // 1. Update all players on this team to free agents
-          try {
-            await db.update(players)
-              .set({
-                currentTeamId: null,
-                status: 'free_agent'
-              })
-              .where(eq(players.currentTeamId, teamId));
-          } catch (error) {
-            errors.push('Failed to update players');
-            console.error('Error updating players:', error);
+          await db.update(players)
+            .set({
+              currentTeamId: null,
+              status: 'free_agent'
+            })
+            .where(eq(players.currentTeamId, teamId));
+
+          // Assign Free Agent role to all players
+          for (const player of teamPlayers) {
+            await assignFreeAgentRole(interaction, player.id);
           }
-
+          
           // 2. Delete all contracts associated with this team
           try {
             await db.delete(contracts)
@@ -261,13 +297,25 @@ export const TeamCommands = [
         const teamName = interaction.options.getString('name', true);
 
         // Get team from database
-        const team = await db.query.teams.findFirst({
-          where: eq(teams.name, teamName)
-        });
+        const team = await db.select({
+          id: teams.id,
+          name: teams.name,
+        })
+        .from(teams)
+        .where(eq(teams.name, teamName))
+        .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply(`Team "${teamName}" not found in database`);
         }
+
+        // Get all players before updating
+        const teamPlayers = await db.select({
+          id: players.id,
+        })
+        .from(players)
+        .where(eq(players.currentTeamId, team.id));
+
 
         // Update all players on this team to free agents
         await db.update(players)
@@ -276,6 +324,11 @@ export const TeamCommands = [
             status: 'free_agent'
           })
           .where(eq(players.currentTeamId, team.id));
+        
+        // Assign Free Agent role to all affected players
+        for (const player of teamPlayers) {
+          await assignFreeAgentRole(interaction, player.id);
+        }
 
         // Delete all contracts associated with this team
         await db.delete(contracts)
@@ -680,7 +733,7 @@ export const TeamCommands = [
             });
           }
 
-          // Update player status in database
+          // After setting player as free agent
           await db.update(players)
             .set({ 
               currentTeamId: null,
@@ -688,6 +741,8 @@ export const TeamCommands = [
               salaryExempt: false 
             })
             .where(eq(players.id, selectedPlayerId));
+            
+          await assignFreeAgentRole(interaction, selectedPlayerId);
 
           // Terminate any active contracts
           await db.update(contracts)
