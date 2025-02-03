@@ -384,6 +384,7 @@ export const TeamCommands = [
             id: true,
             username: true,
             discordId: true,
+            salaryExempt: true,
           },
         });
 
@@ -398,8 +399,12 @@ export const TeamCommands = [
           eq(contracts.status, 'active')
         ));
 
-        // Calculate total salary
-        const totalSalary = activeContracts.reduce((sum, contract) => sum + contract.salary, 0);
+        // Calculate total salary excluding exempt players
+        const totalSalary = activeContracts.reduce((sum, contract) => {
+          const player = teamPlayers.find(p => p.id === contract.playerId);
+          return sum + (player?.salaryExempt ? 0 : contract.salary);
+        }, 0);
+
         const availableCap = (team.salaryCap ?? 0) - totalSalary;
 
         // Create embed for team information
@@ -418,16 +423,32 @@ export const TeamCommands = [
 
         // Add roster information
         if (teamPlayers.length > 0) {
-          const playerList = teamPlayers.map(player => {
+          // Separate exempt and non-exempt players
+          const exemptPlayers = teamPlayers.filter(p => p.salaryExempt);
+          const nonExemptPlayers = teamPlayers.filter(p => !p.salaryExempt);
+
+          // Format player lists
+          const formatPlayer = (player: typeof teamPlayers[0]) => {
             const playerContract = activeContracts.find(c => c.playerId === player.id);
             const salary = playerContract ? `$${playerContract.salary.toLocaleString()}` : 'No active contract';
             return `<@${player.discordId}> - ${salary}`;
-          }).join('\n');
+          };
 
-          embed.addFields({ 
-            name: 'Current Roster', 
-            value: playerList || 'No players on roster'
-          });
+          // Add non-exempt players
+          if (nonExemptPlayers.length > 0) {
+            embed.addFields({ 
+              name: 'Active Roster', 
+              value: nonExemptPlayers.map(formatPlayer).join('\n') || 'No active players'
+            });
+          }
+
+          // Add exempt players with special indicator
+          if (exemptPlayers.length > 0) {
+            embed.addFields({ 
+              name: '🌟 Salary Cap Exempt Players', 
+              value: exemptPlayers.map(formatPlayer).join('\n')
+            });
+          }
         } else {
           embed.addFields({ 
             name: 'Current Roster', 
