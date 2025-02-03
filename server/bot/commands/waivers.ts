@@ -171,7 +171,7 @@ export const WaiversCommands = [
         const notificationChannel = await interaction.guild?.channels.fetch(settings.notificationChannelId);
         if (notificationChannel?.isTextBased()) {
           await notificationChannel.send({
-            content: `<@&${settings.scoutRoleId}> <@&${settings.gmRoleId}> A new player is available on waivers!`,
+            content: `**🚨 Waiver Wire Alert!**\n<@&${settings.scoutRoleId}> <@&${settings.gmRoleId}>\nA new player is available on waivers!`,
             embeds: [waiverEmbed],
           });
         }
