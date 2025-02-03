@@ -6,8 +6,9 @@ export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").unique().notNull(),
   discordCategoryId: text("discord_category_id").notNull(),
-  salaryCap: integer("salary_cap").default(0),
-  availableCap: integer("available_cap").default(0),
+  salaryCap: integer("salary_cap").default(82500000),
+  capFloor: integer("cap_floor").default(3000000),
+  availableCap: integer("available_cap").default(82500000),
   metadata: text("metadata"),
 });
 
@@ -37,6 +38,7 @@ export const guildSettings = pgTable("guild_settings", {
   id: serial("id").primaryKey(),
   guildId: text("guild_id").unique().notNull(),
   welcomeChannelId: text("welcome_channel_id").notNull(),
+  capNotificationChannelId: text("cap_notification_channel_id"),
 });
 
 export const waivers = pgTable("waivers", {

@@ -3,6 +3,7 @@ import { db } from '@db';
 import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and, lt } from 'drizzle-orm';
 import { registerCommands } from './commands';
+import { checkCapCompliance } from './commands/admin';
 
 declare module 'discord.js' {
   interface Client {
@@ -154,7 +155,9 @@ client.once(Events.ClientReady, async (c) => {
     await registerCommands(client);
     console.log('All commands registered successfully!');
 
-    setInterval(checkExpiredContracts, 5 * 60 * 1000);
+    // Set up periodic checks
+    setInterval(checkExpiredContracts, 5 * 60 * 1000); // Every 5 minutes
+    setInterval(() => checkCapCompliance(client), 15 * 60 * 1000); // Every 15 minutes
   } catch (error) {
     console.error('Failed to register commands:', error);
   }
