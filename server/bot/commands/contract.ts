@@ -72,9 +72,15 @@ export const ContractCommands = [
         const teamRole = interaction.options.getRole('team', true);
 
         // Validate team exists and has cap space
-        const team = await db.query.teams.findFirst({
-          where: eq(teams.name, teamRole.name),
-        });
+        const team = await db.select({
+          id: teams.id,
+          name: teams.name,
+          salaryCap: teams.salaryCap,
+          availableCap: teams.availableCap,
+        })
+        .from(teams)
+        .where(eq(teams.name, teamRole.name))
+        .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply('Invalid team: Make sure the team exists in the database');
@@ -103,12 +109,16 @@ export const ContractCommands = [
         }
 
         // Create or get player
-        let player = await db.query.players.findFirst({
-          where: eq(players.discordId, user.id),
-        });
+        let player = await db.select({
+          id: players.id,
+          username: players.username,
+          welcomeMessageSent: players.welcomeMessageSent,
+        })
+        .from(players)
+        .where(eq(players.discordId, user.id))
+        .then(rows => rows[0]);
 
-        const isNewPlayer = !player;
-        if (isNewPlayer) {
+        if (!player) {
           const result = await db.insert(players).values({
             discordId: user.id,
             username: user.username,
@@ -118,7 +128,7 @@ export const ContractCommands = [
         }
 
         // Send welcome message to new players
-        if (isNewPlayer || !player.welcomeMessageSent) {
+        if (!player.welcomeMessageSent) {
           await sendWelcomeMessage(user, teamRole);
           await db.update(players)
             .set({ welcomeMessageSent: true })
@@ -132,7 +142,7 @@ export const ContractCommands = [
         endDate.setDate(endDate.getDate() + length);
         expirationDate.setHours(expirationDate.getHours() + 24); // Contract offer expires in 24 hours
 
-        await db.insert(contracts).values({
+        const contract = await db.insert(contracts).values({
           playerId: player.id,
           teamId: team.id,
           salary,
@@ -144,7 +154,7 @@ export const ContractCommands = [
             expiresAt: expirationDate.toISOString(),
             offerMessageId: '', // Will be updated after sending the message
           }),
-        });
+        }).returning();
 
         // Create embed for contract offer
         const embed = new EmbedBuilder()
@@ -190,7 +200,7 @@ export const ContractCommands = [
           ]);
 
           // Update the contract with the message ID for future reference
-          if ('id' in replyMessage) {
+          if ('id' in replyMessage && contract[0]) {
             await db.update(contracts)
               .set({
                 metadata: JSON.stringify({
@@ -198,7 +208,7 @@ export const ContractCommands = [
                   offerMessageId: replyMessage.id,
                 }),
               })
-              .where(eq(contracts.id, player.id));
+              .where(eq(contracts.id, contract[0].id));
           }
         }
 

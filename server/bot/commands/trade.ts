@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, Role } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
 import { players, teams } from '@db/schema';
 import { eq } from 'drizzle-orm';
@@ -27,22 +27,34 @@ export const TradeCommands = [
       const user = interaction.options.getUser('player', true);
 
       // Validate teams
-      const fromTeam = await db.query.teams.findFirst({
-        where: eq(teams.name, fromTeamRole.name),
-      });
+      const fromTeam = await db.select({
+        id: teams.id,
+        name: teams.name,
+      })
+      .from(teams)
+      .where(eq(teams.name, fromTeamRole.name))
+      .then(rows => rows[0]);
 
-      const toTeam = await db.query.teams.findFirst({
-        where: eq(teams.name, toTeamRole.name),
-      });
+      const toTeam = await db.select({
+        id: teams.id,
+        name: teams.name,
+      })
+      .from(teams)
+      .where(eq(teams.name, toTeamRole.name))
+      .then(rows => rows[0]);
 
       if (!fromTeam || !toTeam) {
         return interaction.reply('Invalid team name(s)');
       }
 
       // Get player
-      const player = await db.query.players.findFirst({
-        where: eq(players.discordId, user.id),
-      });
+      const player = await db.select({
+        id: players.id,
+        discordId: players.discordId,
+      })
+      .from(players)
+      .where(eq(players.discordId, user.id))
+      .then(rows => rows[0]);
 
       if (!player) {
         return interaction.reply('Player not found in database');
@@ -58,13 +70,13 @@ export const TradeCommands = [
 
       if (member) {
         // Remove old team role
-        if (fromTeamRole) {
-          await member.roles.remove(fromTeamRole);
+        if ('id' in fromTeamRole) {
+          await member.roles.remove(fromTeamRole.id);
         }
 
         // Add new team role
-        if (toTeamRole) {
-          await member.roles.add(toTeamRole);
+        if ('id' in toTeamRole) {
+          await member.roles.add(toTeamRole.id);
         }
       }
 
