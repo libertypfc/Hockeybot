@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, EmbedBuilder, ChatInputCommandInteraction, Role } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
 import { eq } from 'drizzle-orm';
@@ -42,96 +42,109 @@ export const ContractCommands = [
               .setRequired(true))),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      const subcommand = interaction.options.getSubcommand();
-      const user = interaction.options.getUser('player', true);
-      const teamRole = interaction.options.getRole('team', true);
+      await interaction.deferReply();
 
-      // Validate team exists and has cap space
-      const team = await db.query.teams.findFirst({
-        where: eq(teams.name, teamRole.name),
-      });
+      try {
+        const subcommand = interaction.options.getSubcommand();
+        const user = interaction.options.getUser('player', true);
+        const teamRole = interaction.options.getRole('team', true);
 
-      if (!team) {
-        return interaction.reply('Invalid team: Make sure the team exists in the database');
+        // Validate team exists and has cap space
+        const team = await db.query.teams.findFirst({
+          where: eq(teams.name, teamRole.name),
+        });
+
+        if (!team) {
+          return interaction.editReply('Invalid team: Make sure the team exists in the database');
+        }
+
+        let salary: number;
+        let length: number;
+        let title: string;
+        let lengthDisplay: string;
+
+        if (subcommand === 'elc') {
+          // Fixed ELC values
+          salary = 925000; // $925,000
+          length = 210; // 30 weeks * 7 days
+          title = 'Entry Level Contract Offer';
+          lengthDisplay = '30 weeks';
+        } else {
+          // Custom contract values
+          salary = interaction.options.getInteger('salary', true);
+          length = interaction.options.getInteger('length', true);
+          title = 'Contract Offer';
+          lengthDisplay = `${length} days`;
+        }
+
+        const availableCap = team.availableCap ?? 0;
+        if (availableCap < salary) {
+          return interaction.editReply('Team does not have enough cap space');
+        }
+
+        // Create or get player
+        let player = await db.query.players.findFirst({
+          where: eq(players.discordId, user.id),
+        });
+
+        if (!player) {
+          const result = await db.insert(players).values({
+            discordId: user.id,
+            username: user.username,
+          }).returning();
+          player = result[0];
+        }
+
+        // Create contract
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + length);
+
+        await db.insert(contracts).values({
+          playerId: player.id,
+          teamId: team.id,
+          salary,
+          lengthInDays: length,
+          startDate,
+          endDate,
+        });
+
+        // Create embed for contract offer
+        const embed = new EmbedBuilder()
+          .setTitle(title)
+          .setDescription(`${user} has been offered a contract by ${teamRole}`)
+          .addFields(
+            { name: 'Salary', value: `$${salary.toLocaleString()}` },
+            { name: 'Length', value: lengthDisplay },
+          )
+          .setFooter({ text: '✅ to accept, ❌ to decline' });
+
+        // First send a direct notification
+        const notificationContent = `🏒 Hey ${user}! You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!\n` +
+          `Details:\n` +
+          `• Salary: $${salary.toLocaleString()}\n` +
+          `• Length: ${lengthDisplay}\n` +
+          `Please check the offer below and respond with ✅ to accept or ❌ to decline.`;
+
+        // Send the message and add reactions
+        const replyMessage = await interaction.editReply({
+          content: notificationContent,
+          embeds: [embed],
+        });
+
+        if ('react' in replyMessage) {
+          // Add reactions immediately
+          await Promise.all([
+            replyMessage.react('✅'),
+            replyMessage.react('❌'),
+          ]);
+        }
+
+      } catch (error) {
+        console.error('Error in contract offer command:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to create contract offer: ${errorMessage}`);
       }
-
-      let salary: number;
-      let length: number;
-      let title: string;
-      let lengthDisplay: string;
-
-      if (subcommand === 'elc') {
-        // Fixed ELC values
-        salary = 925000; // $925,000
-        length = 210; // 30 weeks * 7 days
-        title = 'Entry Level Contract Offer';
-        lengthDisplay = '30 weeks';
-      } else {
-        // Custom contract values
-        salary = interaction.options.getInteger('salary', true);
-        length = interaction.options.getInteger('length', true);
-        title = 'Contract Offer';
-        lengthDisplay = `${length} days`;
-      }
-
-      const availableCap = team.availableCap ?? 0;
-      if (availableCap < salary) {
-        return interaction.reply('Team does not have enough cap space');
-      }
-
-      // Create or get player
-      let player = await db.query.players.findFirst({
-        where: eq(players.discordId, user.id),
-      });
-
-      if (!player) {
-        const result = await db.insert(players).values({
-          discordId: user.id,
-          username: user.username,
-        }).returning();
-        player = result[0];
-      }
-
-      // Create contract
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + length);
-
-      await db.insert(contracts).values({
-        playerId: player.id,
-        teamId: team.id,
-        salary,
-        lengthInDays: length,
-        startDate,
-        endDate,
-      });
-
-      // Create embed for contract offer
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(`${user} has been offered a contract by ${teamRole}`)
-        .addFields(
-          { name: 'Salary', value: `$${salary.toLocaleString()}` },
-          { name: 'Length', value: lengthDisplay },
-        )
-        .setFooter({ text: '✅ to accept, ❌ to decline' });
-
-      // First send a direct notification
-      const notificationContent = `🏒 Hey ${user}! You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!\n` +
-        `Details:\n` +
-        `• Salary: $${salary.toLocaleString()}\n` +
-        `• Length: ${lengthDisplay}\n` +
-        `Please check the offer below and respond with ✅ to accept or ❌ to decline.`;
-
-      await interaction.reply({ 
-        content: notificationContent,
-        embeds: [embed],
-        fetchReply: true,
-      }).then(async message => {
-        // Add reactions for acceptance and denial
-        await message.react('✅');
-        await message.react('❌');
-      });
     },
   },
 ];
