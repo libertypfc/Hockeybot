@@ -3,6 +3,28 @@ import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
 import { eq } from 'drizzle-orm';
 
+async function sendWelcomeMessage(user: any, teamRole: any) {
+  const welcomeEmbed = new EmbedBuilder()
+    .setTitle('🏒 Welcome to the Hockey League!')
+    .setDescription(
+      `Hello ${user}, welcome to our hockey league! You've been offered a contract by ${teamRole}.\n\n` +
+      `Here's what you need to know:\n` +
+      `• Your stats will be tracked through our system\n` +
+      `• You can view your stats and performance on our web dashboard\n` +
+      `• Contract offers will be sent to you directly\n` +
+      `• Use reactions (✅/❌) to accept or decline contracts\n\n` +
+      `Good luck and have fun! 🎮`
+    )
+    .setColor('#4ade80')
+    .setTimestamp();
+
+  try {
+    await user.send({ embeds: [welcomeEmbed] });
+  } catch (error) {
+    console.warn(`Could not send welcome DM to ${user.tag}`, error);
+  }
+}
+
 export const ContractCommands = [
   {
     data: new SlashCommandBuilder()
@@ -64,13 +86,11 @@ export const ContractCommands = [
         let lengthDisplay: string;
 
         if (subcommand === 'elc') {
-          // Fixed ELC values
           salary = 925000; // $925,000
           length = 210; // 30 weeks * 7 days
           title = 'Entry Level Contract Offer';
           lengthDisplay = '30 weeks';
         } else {
-          // Custom contract values
           salary = interaction.options.getInteger('salary', true);
           length = interaction.options.getInteger('length', true);
           title = 'Contract Offer';
@@ -87,12 +107,22 @@ export const ContractCommands = [
           where: eq(players.discordId, user.id),
         });
 
-        if (!player) {
+        const isNewPlayer = !player;
+        if (isNewPlayer) {
           const result = await db.insert(players).values({
             discordId: user.id,
             username: user.username,
+            welcomeMessageSent: false
           }).returning();
           player = result[0];
+        }
+
+        // Send welcome message to new players
+        if (isNewPlayer || !player.welcomeMessageSent) {
+          await sendWelcomeMessage(user, teamRole);
+          await db.update(players)
+            .set({ welcomeMessageSent: true })
+            .where(eq(players.id, player.id));
         }
 
         // Create contract with expiration time (24 hours from now)
@@ -110,7 +140,6 @@ export const ContractCommands = [
           startDate,
           endDate,
           status: 'pending',
-          // Add metadata to track offer expiration
           metadata: JSON.stringify({
             expiresAt: expirationDate.toISOString(),
             offerMessageId: '', // Will be updated after sending the message
