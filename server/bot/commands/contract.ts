@@ -119,16 +119,27 @@ export const ContractCommands = [
           )
           .setFooter({ text: '✅ to accept, ❌ to decline' });
 
-        // First send a direct notification
-        const notificationContent = `🏒 Hey ${user}! You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!\n` +
-          `Details:\n` +
-          `• Salary: $${salary.toLocaleString()}\n` +
-          `• Length: ${lengthDisplay}\n` +
-          `Please check the offer below and respond with ✅ to accept or ❌ to decline.`;
+        // First send a direct notification to the player
+        try {
+          const dmEmbed = new EmbedBuilder()
+            .setTitle('🏒 New Contract Offer!')
+            .setDescription(`You have received a ${subcommand === 'elc' ? 'new Entry Level Contract' : 'contract'} offer from ${teamRole}!`)
+            .addFields(
+              { name: 'Team', value: team.name },
+              { name: 'Salary', value: `$${salary.toLocaleString()}` },
+              { name: 'Length', value: lengthDisplay },
+            )
+            .setFooter({ text: 'Check the offer in the server and react with ✅ to accept or ❌ to decline' });
 
-        // Send the message and add reactions
+          await user.send({ embeds: [dmEmbed] });
+        } catch (error) {
+          console.warn(`Could not send DM to ${user.tag}`, error);
+          // Don't return here, continue with the channel message
+        }
+
+        // Send the message in the channel and add reactions
         const replyMessage = await interaction.editReply({
-          content: notificationContent,
+          content: `Contract offer sent to ${user}. They have been notified via DM.`,
           embeds: [embed],
         });
 
