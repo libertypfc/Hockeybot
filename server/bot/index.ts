@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChannel, DMChannel, ChannelType } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChannel, DMChannel, ChannelType, SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and, lt } from 'drizzle-orm';
@@ -7,17 +7,16 @@ import { checkCapCompliance } from './commands/admin';
 
 declare module 'discord.js' {
   interface Client {
-    commands: Collection<string, any>;
+    commands: Collection<string, {
+      data: SlashCommandBuilder,
+      execute: (interaction: ChatInputCommandInteraction) => Promise<void>
+    }>;
   }
-}
-
-if (!process.env.DISCORD_TOKEN) {
-  throw new Error('DISCORD_TOKEN environment variable is required');
 }
 
 class ReliableDiscordClient extends Client {
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 20; // Increased from 10 to 20
+  private maxReconnectAttempts: number = 20;
   private baseDelay: number = 1000;
   private heartbeatInterval?: NodeJS.Timeout;
   private watchdogInterval?: NodeJS.Timeout;
@@ -46,12 +45,14 @@ class ReliableDiscordClient extends Client {
 
     this.commands = new Collection();
 
-    // Set up event handlers for connection management
+    // Enhanced error logging and connection management
     this.on('error', this.handleError.bind(this));
+    this.on('debug', (message) => console.log(`[Debug] ${message}`));
+    this.on('warn', (message) => console.warn(`[Warning] ${message}`));
     this.on('disconnect', this.handleDisconnect.bind(this));
-    this.on('reconnecting', () => console.log('Bot is reconnecting...'));
+    this.on('reconnecting', () => console.log('[Status] Bot is reconnecting...'));
     this.on('ready', () => {
-      console.log('Bot is ready and connected!');
+      console.log('[Status] Bot is ready and connected!');
       this.lastHeartbeat = Date.now();
       this.reconnectAttempts = 0;
     });
@@ -59,28 +60,26 @@ class ReliableDiscordClient extends Client {
     // Handle process termination
     process.on('SIGINT', () => this.handleShutdown());
     process.on('SIGTERM', () => this.handleShutdown());
-
-    // Handle uncaught errors
     process.on('uncaughtException', this.handleUncaughtError.bind(this));
     process.on('unhandledRejection', this.handleUncaughtError.bind(this));
   }
 
   private handleUncaughtError(error: Error) {
-    console.error('Uncaught error:', error);
+    console.error('[Critical Error] Uncaught error:', error);
     if (!this.isShuttingDown) {
       this.attemptReconnect(true);
     }
   }
 
   private async handleError(error: Error) {
-    console.error('Bot encountered an error:', error);
+    console.error('[Error] Bot encountered an error:', error);
     if (!this.isShuttingDown) {
       await this.attemptReconnect(true);
     }
   }
 
   private async handleDisconnect() {
-    console.log('Bot disconnected from Discord');
+    console.log('[Status] Bot disconnected from Discord');
     if (!this.isShuttingDown) {
       await this.attemptReconnect(true);
     }
@@ -90,17 +89,17 @@ class ReliableDiscordClient extends Client {
     if (this.isShuttingDown) return;
 
     if (force) {
-      console.log('Forcing immediate reconnection attempt...');
+      console.log('[Recovery] Forcing immediate reconnection attempt...');
       this.reconnectAttempts = 0;
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Maximum reconnection attempts reached. Resetting client...');
+      console.error('[Recovery] Maximum reconnection attempts reached. Resetting client...');
       await this.destroy();
       await this.start();
       return;
     }
 
     const delay = force ? 0 : this.baseDelay * Math.pow(2, this.reconnectAttempts);
-    console.log(`Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+    console.log(`[Recovery] Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
 
     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -114,26 +113,26 @@ class ReliableDiscordClient extends Client {
       if (!force) {
         this.reconnectAttempts = 0;
       }
-      console.log('Successfully reconnected to Discord!');
+      console.log('[Recovery] Successfully reconnected to Discord!');
 
       // Schedule a forced reconnect after 6 hours to prevent stale connections
       if (this.forcedReconnectTimeout) {
         clearTimeout(this.forcedReconnectTimeout);
       }
       this.forcedReconnectTimeout = setTimeout(() => {
-        console.log('Performing scheduled connection refresh...');
+        console.log('[Maintenance] Performing scheduled connection refresh...');
         this.attemptReconnect(true);
       }, 6 * 60 * 60 * 1000);
 
     } catch (error) {
-      console.error('Reconnection attempt failed:', error);
+      console.error('[Recovery] Reconnection attempt failed:', error);
       this.reconnectAttempts++;
       await this.attemptReconnect();
     }
   }
 
   private async handleShutdown() {
-    console.log('Shutting down bot gracefully...');
+    console.log('[Shutdown] Shutting down bot gracefully...');
     this.isShuttingDown = true;
 
     if (this.heartbeatInterval) {
@@ -148,37 +147,33 @@ class ReliableDiscordClient extends Client {
 
     try {
       await this.destroy();
-      console.log('Bot shutdown complete');
+      console.log('[Shutdown] Bot shutdown complete');
       process.exit(0);
     } catch (error) {
-      console.error('Error during shutdown:', error);
+      console.error('[Shutdown] Error during shutdown:', error);
       process.exit(1);
     }
   }
 
   private startHeartbeat() {
-    // Clear existing intervals if they exist
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-    }
-    if (this.watchdogInterval) {
-      clearInterval(this.watchdogInterval);
-    }
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+    if (this.watchdogInterval) clearInterval(this.watchdogInterval);
 
     // Send heartbeat every 30 seconds
     this.heartbeatInterval = setInterval(() => {
       if (this.isReady()) {
         this.lastHeartbeat = Date.now();
+        console.log('[Heartbeat] Connection alive');
       } else {
-        console.log('Heartbeat check failed, connection may be dead');
+        console.log('[Heartbeat] Check failed, connection may be dead');
       }
     }, 30000);
 
-    // Watchdog checks every 15 seconds if heartbeat is recent
+    // Watchdog checks every 15 seconds
     this.watchdogInterval = setInterval(() => {
       const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-      if (timeSinceLastHeartbeat > 45000) { // No heartbeat for 45 seconds
-        console.log('Watchdog detected stale connection, forcing reconnect...');
+      if (timeSinceLastHeartbeat > 45000) {
+        console.log('[Watchdog] Detected stale connection, forcing reconnect...');
         this.attemptReconnect(true);
       }
     }, 15000);
@@ -188,15 +183,14 @@ class ReliableDiscordClient extends Client {
     try {
       await this.login(process.env.DISCORD_TOKEN);
       this.startHeartbeat();
-      console.log('Bot successfully started and connected!');
+      console.log('[Startup] Bot successfully started and connected!');
 
-      // Schedule first forced reconnect
       this.forcedReconnectTimeout = setTimeout(() => {
         this.attemptReconnect(true);
       }, 6 * 60 * 60 * 1000);
 
     } catch (error) {
-      console.error('Failed to start the bot:', error);
+      console.error('[Startup] Failed to start the bot:', error);
       await this.attemptReconnect(true);
     }
   }
@@ -243,23 +237,24 @@ async function checkExpiredContracts() {
                         break;
                       }
                     } catch (e) {
+                      console.error(`[Error] Failed to fetch or edit message in channel ${channel.id}:`, e);
                       continue;
                     }
                   }
                 }
               }
             } catch (error) {
-              console.error('Error updating expired contract message:', error);
+              console.error('[Error] Error updating expired contract message:', error);
             }
           }
         }
       } catch (error) {
-        console.error('Error processing contract:', error);
+        console.error('[Error] Error processing contract:', error);
         continue;
       }
     }
   } catch (error) {
-    console.error('Error checking expired contracts:', error);
+    console.error('[Error] Error checking expired contracts:', error);
   }
 }
 
@@ -287,7 +282,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
       // Try to send DM first
       await member.user.send({ embeds: [welcomeEmbed] });
     } catch (error) {
-      console.warn(`Could not send welcome DM to ${member.user.tag}`, error);
+      console.warn(`[Warning] Could not send welcome DM to ${member.user.tag}`, error);
 
       // Get configured welcome channel
       const settings = await db.query.guildSettings.findFirst({
@@ -300,7 +295,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
       }
 
       // Fallback to finding a general channel if no channel is configured
-      if (!welcomeChannel || welcomeChannel.type !== ChannelType.GuildText) {
+      if (!welcomeChannel || welcomeChannel?.type !== ChannelType.GuildText) {
         const channels = await member.guild.channels.fetch();
         welcomeChannel = channels.find(channel =>
           channel.type === ChannelType.GuildText &&
@@ -316,24 +311,24 @@ client.on(Events.GuildMemberAdd, async (member) => {
       }
     }
   } catch (error) {
-    console.error('Error sending welcome message:', error);
+    console.error('[Error] Error sending welcome message:', error);
   }
 });
 
 client.once(Events.ClientReady, async (c) => {
-  console.log(`Discord bot is ready! Logged in as ${c.user.tag}`);
+  console.log(`[Status] Discord bot is ready! Logged in as ${c.user.tag}`);
 
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   try {
     await registerCommands(client);
-    console.log('All commands registered successfully!');
+    console.log('[Status] All commands registered successfully!');
 
     // Set up periodic checks
     setInterval(checkExpiredContracts, 5 * 60 * 1000); // Every 5 minutes
     setInterval(() => checkCapCompliance(client), 15 * 60 * 1000); // Every 15 minutes
   } catch (error) {
-    console.error('Failed to register commands:', error);
+    console.error('[Error] Failed to register commands:', error);
   }
 });
 
@@ -356,7 +351,7 @@ client.on(Events.MessageCreate, async (message) => {
       await message.reply({ embeds: [embed] });
     }
   } catch (error) {
-    console.error('Error handling message:', error);
+    console.error('[Error] Error handling message:', error);
   }
 });
 
@@ -378,7 +373,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     });
 
     if (!player) {
-      console.error('Player not found in database');
+      console.error('[Error] Player not found in database');
       return;
     }
 
@@ -393,7 +388,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     });
 
     if (!pendingContract || !pendingContract.team) {
-      console.error('No pending contract found');
+      console.error('[Error] No pending contract found');
       return;
     }
 
@@ -459,7 +454,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     }
 
   } catch (error) {
-    console.error('Error processing contract reaction:', error);
+    console.error('[Error] Error processing contract reaction:', error);
   }
 });
 
@@ -468,14 +463,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   const command = client.commands.get(interaction.commandName);
   if (!command) {
-    console.error(`Command not found: ${interaction.commandName}`);
+    console.error(`[Error] Command not found: ${interaction.commandName}`);
     return;
   }
 
   try {
     await command.execute(interaction);
   } catch (error) {
-    console.error(`Error executing command ${interaction.commandName}:`, error);
+    console.error(`[Error] Error executing command ${interaction.commandName}:`, error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     await interaction.reply({
       content: `There was an error executing this command: ${errorMessage}`,
