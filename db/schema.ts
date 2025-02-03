@@ -12,6 +12,18 @@ export const teams = pgTable("teams", {
   metadata: text("metadata"),
 });
 
+export const teamStats = pgTable("team_stats", {
+  id: serial("id").primaryKey(),
+  teamId: integer("team_id").references(() => teams.id).notNull(),
+  season: integer("season").notNull(),
+  wins: integer("wins").default(0),
+  losses: integer("losses").default(0),
+  otLosses: integer("ot_losses").default(0),
+  goalsFor: integer("goals_for").default(0),
+  goalsAgainst: integer("goals_against").default(0),
+  points: integer("points").default(0),
+});
+
 export const players = pgTable("players", {
   id: serial("id").primaryKey(),
   discordId: text("discord_id").unique().notNull(),
@@ -61,6 +73,14 @@ export const waiverSettings = pgTable("waiver_settings", {
 export const teamsRelations = relations(teams, ({ many }) => ({
   players: many(players),
   contracts: many(contracts),
+  teamStats: many(teamStats),
+}));
+
+export const teamStatsRelations = relations(teamStats, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamStats.teamId],
+    references: [teams.id],
+  }),
 }));
 
 export const playersRelations = relations(players, ({ one, many }) => ({
@@ -150,6 +170,10 @@ export const selectGoalieStatsSchema = createSelectSchema(goalieStats);
 export const insertGuildSettingsSchema = createInsertSchema(guildSettings);
 export const selectGuildSettingsSchema = createSelectSchema(guildSettings);
 
+export const insertTeamStatsSchema = createInsertSchema(teamStats);
+export const selectTeamStatsSchema = createSelectSchema(teamStats);
+
+
 export type PlayerStats = typeof playerStats.$inferSelect;
 export type GoalieStats = typeof goalieStats.$inferSelect;
 export type Team = typeof teams.$inferSelect;
@@ -158,3 +182,4 @@ export type Contract = typeof contracts.$inferSelect;
 export type Waiver = typeof waivers.$inferSelect;
 export type WaiverSettings = typeof waiverSettings.$inferSelect;
 export type GuildSettings = typeof guildSettings.$inferSelect;
+export type TeamStats = typeof teamStats.$inferSelect;

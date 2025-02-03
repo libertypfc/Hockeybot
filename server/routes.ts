@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { startBot } from './bot';
 import { db } from '@db';
-import { teams, players, contracts } from '@db/schema';
+import { teams, players, contracts, teamStats, playerStats } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
@@ -78,6 +78,100 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Error fetching teams:', error);
       res.status(500).json({ error: 'Failed to fetch teams' });
+    }
+  });
+
+  // Get team stats
+  app.get('/api/teams/stats/:teamId', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId);
+      const currentSeason = new Date().getFullYear();
+
+      const stats = await db.query.teamStats.findFirst({
+        where: and(
+          eq(teamStats.teamId, teamId),
+          eq(teamStats.season, currentSeason)
+        ),
+      });
+
+      if (!stats) {
+        // Return default stats if none exist
+        return res.json({
+          wins: 0,
+          losses: 0,
+          otLosses: 0,
+          goalsFor: 0,
+          goalsAgainst: 0,
+          points: 0,
+        });
+      }
+
+      res.json(stats);
+    } catch (error) {
+      console.error('Error fetching team stats:', error);
+      res.status(500).json({ error: 'Failed to fetch team stats' });
+    }
+  });
+
+  // Get team players
+  app.get('/api/teams/players/:teamId', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId);
+      const teamPlayers = await db.query.players.findMany({
+        where: eq(players.currentTeamId, teamId),
+      });
+
+      res.json(teamPlayers);
+    } catch (error) {
+      console.error('Error fetching team players:', error);
+      res.status(500).json({ error: 'Failed to fetch team players' });
+    }
+  });
+
+  // Get player stats
+  app.get('/api/players/stats/:playerId', async (req, res) => {
+    try {
+      const playerId = parseInt(req.params.playerId);
+      const stats = await db.query.playerStats.findMany({
+        where: eq(playerStats.playerId, playerId),
+      });
+
+      if (!stats.length) {
+        // Return default stats if none exist
+        return res.json({
+          hits: 0,
+          fow: 0,
+          foTaken: 0,
+          takeaways: 0,
+          giveaways: 0,
+          shots: 0,
+          pim: 0,
+        });
+      }
+
+      // Aggregate stats
+      const aggregatedStats = stats.reduce((acc, stat) => ({
+        hits: acc.hits + (stat.hits || 0),
+        fow: acc.fow + (stat.fow || 0),
+        foTaken: acc.foTaken + (stat.foTaken || 0),
+        takeaways: acc.takeaways + (stat.takeaways || 0),
+        giveaways: acc.giveaways + (stat.giveaways || 0),
+        shots: acc.shots + (stat.shots || 0),
+        pim: acc.pim + (stat.pim || 0),
+      }), {
+        hits: 0,
+        fow: 0,
+        foTaken: 0,
+        takeaways: 0,
+        giveaways: 0,
+        shots: 0,
+        pim: 0,
+      });
+
+      res.json(aggregatedStats);
+    } catch (error) {
+      console.error('Error fetching player stats:', error);
+      res.status(500).json({ error: 'Failed to fetch player stats' });
     }
   });
 
