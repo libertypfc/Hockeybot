@@ -559,4 +559,185 @@ export const TeamCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('removeplayer')
+      .setDescription('Remove a player from a team'),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      try {
+        // Get all teams from database
+        const allTeams = await db.query.teams.findMany({
+          with: {
+            players: {
+              where: eq(players.status, 'signed'),
+            },
+          },
+        });
+
+        if (allTeams.length === 0) {
+          return interaction.reply('No teams found in the database.');
+        }
+
+        // Create select menu for teams
+        const teamSelect = new StringSelectMenuBuilder()
+          .setCustomId('team-select')
+          .setPlaceholder('Select a team')
+          .addOptions(
+            allTeams.map(team => 
+              new StringSelectMenuOptionBuilder()
+                .setLabel(team.name)
+                .setValue(team.id.toString())
+                .setDescription(`Select ${team.name} to remove a player`)
+            )
+          );
+
+        const row = new ActionRowBuilder<StringSelectMenuBuilder>()
+          .addComponents(teamSelect);
+
+        const response = await interaction.reply({
+          content: 'Please select a team:',
+          components: [row],
+        });
+
+        try {
+          const teamSelection = await response.awaitMessageComponent({
+            filter: i => i.user.id === interaction.user.id,
+            time: 30000,
+            componentType: ComponentType.StringSelect,
+          });
+
+          const selectedTeamId = parseInt(teamSelection.values[0]);
+          const selectedTeam = allTeams.find(t => t.id === selectedTeamId);
+
+          if (!selectedTeam) {
+            return teamSelection.update({
+              content: 'Selected team not found.',
+              components: [],
+            });
+          }
+
+          // Get all signed players for this team
+          const teamPlayers = await db.query.players.findMany({
+            where: and(
+              eq(players.currentTeamId, selectedTeamId),
+              eq(players.status, 'signed')
+            ),
+          });
+
+          if (teamPlayers.length === 0) {
+            return teamSelection.update({
+              content: 'No signed players found for this team.',
+              components: [],
+            });
+          }
+
+          // Create select menu for players
+          const playerSelect = new StringSelectMenuBuilder()
+            .setCustomId('player-select')
+            .setPlaceholder('Select a player')
+            .addOptions(
+              teamPlayers.map(player => 
+                new StringSelectMenuOptionBuilder()
+                  .setLabel(player.username)
+                  .setValue(player.id.toString())
+                  .setDescription(`Remove ${player.username} from the team`)
+              )
+            );
+
+          const playerRow = new ActionRowBuilder<StringSelectMenuBuilder>()
+            .addComponents(playerSelect);
+
+          await teamSelection.update({
+            content: `Select a player to remove from ${selectedTeam.name}:`,
+            components: [playerRow],
+          });
+
+          const playerSelection = await response.awaitMessageComponent({
+            filter: i => i.user.id === interaction.user.id,
+            time: 30000,
+            componentType: ComponentType.StringSelect,
+          });
+
+          const selectedPlayerId = parseInt(playerSelection.values[0]);
+          const selectedPlayer = teamPlayers.find(p => p.id === selectedPlayerId);
+
+          if (!selectedPlayer) {
+            return playerSelection.update({
+              content: 'Selected player not found.',
+              components: [],
+            });
+          }
+
+          // Update player status in database
+          await db.update(players)
+            .set({ 
+              currentTeamId: null,
+              status: 'free_agent',
+              salaryExempt: false 
+            })
+            .where(eq(players.id, selectedPlayerId));
+
+          // Terminate any active contracts
+          await db.update(contracts)
+            .set({ status: 'terminated' })
+            .where(and(
+              eq(contracts.playerId, selectedPlayerId),
+              eq(contracts.status, 'active')
+            ));
+
+          // Remove team role from the player in Discord
+          const guild = interaction.guild;
+          if (guild) {
+            const member = await guild.members.fetch(selectedPlayer.discordId);
+            const teamRole = guild.roles.cache.find(
+              role => role.name === selectedTeam.name
+            );
+
+            if (teamRole && member) {
+              await member.roles.remove(teamRole);
+            }
+          }
+
+          // Notify the player via DM
+          try {
+            const user = await interaction.client.users.fetch(selectedPlayer.discordId);
+            const dmEmbed = new EmbedBuilder()
+              .setTitle('🏒 Team Status Update')
+              .setDescription(`You have been removed from ${selectedTeam.name}.\nYour status has been set to Free Agent.`)
+              .setTimestamp();
+
+            await user.send({ embeds: [dmEmbed] });
+          } catch (error) {
+            console.warn(`Could not send DM to ${selectedPlayer.username}`, error);
+          }
+
+          await playerSelection.update({
+            content: `${selectedPlayer.username} has been removed from ${selectedTeam.name} and set as a free agent.`,
+            components: [],
+          });
+
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('time')) {
+            await interaction.editReply({
+              content: 'Timed out! Please try the command again.',
+              components: [],
+            });
+          } else {
+            console.error('Error in player removal process:', error);
+            const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+            await interaction.editReply({
+              content: `Failed to remove player: ${errorMessage}`,
+              components: [],
+            });
+          }
+        }
+
+      } catch (error) {
+        console.error('Error in removeplayer command:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.reply(`Failed to start player removal process: ${errorMessage}`);
+      }
+    },
+  },
 ];
