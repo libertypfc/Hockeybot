@@ -1,6 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { useQuery } from "@tanstack/react-query";
 import { ExemptionManager } from "@/components/ui/exemption-manager";
+import { Button } from "@/components/ui/button";
+import { Link } from "wouter";
 
 interface ExemptPlayer {
   username: string;
@@ -25,10 +27,17 @@ export default function Home() {
   return (
     <div className="min-h-screen w-full p-8 bg-gray-50">
       <div className="max-w-6xl mx-auto space-y-8">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-gray-900">Hockey League Management System</h1>
+          <Link href="/stats">
+            <Button className="bg-blue-600 hover:bg-blue-700">
+              Stats Tracking
+            </Button>
+          </Link>
+        </div>
+
         <Card>
           <CardContent className="pt-6">
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">Hockey League Management System</h1>
-
             <div className="space-y-6">
               <p className="text-gray-600">
                 Welcome to our comprehensive Hockey League Management System. This platform provides advanced tools for managing your hockey league.
@@ -92,6 +101,7 @@ export default function Home() {
                   <li>Player Trading System</li>
                   <li>Waiver Wire Management</li>
                   <li>Salary Cap Exemptions (2 players per team)</li>
+                  <li>Player and Goalie Stats Tracking</li>
                 </ul>
 
                 <p className="mt-4 text-gray-600">
