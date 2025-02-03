@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { format, startOfWeek, endOfWeek } from 'date-fns';
 import {
   Select,
   SelectContent,
@@ -55,6 +56,17 @@ interface PlayerStats {
   pim: number;
 }
 
+interface Game {
+  id: number;
+  gameDate: string;
+  gameNumber: number;
+  status: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+}
+
 export default function StatsPage() {
   const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
@@ -78,8 +90,65 @@ export default function StatsPage() {
     enabled: !!selectedPlayer,
   });
 
+  // Get current week's schedule
+  const startDate = startOfWeek(new Date());
+  const endDate = endOfWeek(new Date());
+
+  const { data: schedule, isLoading: scheduleLoading } = useQuery<Game[]>({
+    queryKey: ['/api/schedule', { start: startDate.toISOString(), end: endDate.toISOString() }],
+  });
+
   return (
     <div className="container mx-auto py-6 space-y-8">
+      {/* Schedule Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>This Week's Schedule</CardTitle>
+          <CardDescription>
+            {format(startDate, 'MMM d')} - {format(endDate, 'MMM d, yyyy')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>Game</TableHead>
+                <TableHead>Home Team</TableHead>
+                <TableHead>Away Team</TableHead>
+                <TableHead>Score</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scheduleLoading ? (
+                <TableRow>
+                  <TableCell colSpan={5}><Skeleton className="h-4 w-full" /></TableCell>
+                </TableRow>
+              ) : schedule?.map((game) => (
+                <TableRow key={`${game.id}-${game.gameNumber}`}>
+                  <TableCell>{format(new Date(game.gameDate), 'MMM d')}</TableCell>
+                  <TableCell>{game.gameNumber}</TableCell>
+                  <TableCell>{game.homeTeam}</TableCell>
+                  <TableCell>{game.awayTeam}</TableCell>
+                  <TableCell>
+                    {game.homeScore !== null && game.awayScore !== null
+                      ? `${game.homeScore} - ${game.awayScore}`
+                      : 'TBD'}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {schedule?.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center">
+                    No games scheduled this week
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
       {/* Team Selection */}
       <Card>
         <CardHeader>

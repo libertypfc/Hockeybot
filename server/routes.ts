@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { startBot } from './bot';
 import { db } from '@db';
-import { teams, players, contracts, teamStats, playerStats } from '@db/schema';
-import { eq, and } from 'drizzle-orm';
+import { teams, players, contracts, teamStats, playerStats, seasons, gameSchedule } from '@db/schema';
+import { eq, and, gte, lte } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
@@ -78,6 +78,84 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Error fetching teams:', error);
       res.status(500).json({ error: 'Failed to fetch teams' });
+    }
+  });
+
+  // Get the current season and schedule
+  app.get('/api/season/current', async (_req, res) => {
+    try {
+      const currentSeason = await db.query.seasons.findFirst({
+        where: eq(seasons.status, 'active'),
+        with: {
+          gameSchedule: {
+            with: {
+              homeTeam: true,
+              awayTeam: true,
+            },
+          },
+        },
+      });
+
+      if (!currentSeason) {
+        return res.status(404).json({ error: 'No active season found' });
+      }
+
+      res.json(currentSeason);
+    } catch (error) {
+      console.error('Error fetching current season:', error);
+      res.status(500).json({ error: 'Failed to fetch current season' });
+    }
+  });
+
+  // Get schedule for a specific date range
+  app.get('/api/schedule', async (req, res) => {
+    try {
+      const { start, end } = req.query;
+      const startDate = start ? new Date(start as string) : new Date();
+      const endDate = end ? new Date(end as string) : new Date(startDate);
+      endDate.setDate(endDate.getDate() + 7); // Default to a week if no end date
+
+      const games = await db.select({
+        id: gameSchedule.id,
+        gameDate: gameSchedule.gameDate,
+        gameNumber: gameSchedule.gameNumber,
+        status: gameSchedule.status,
+        homeScore: gameSchedule.homeScore,
+        awayScore: gameSchedule.awayScore,
+        homeTeamId: gameSchedule.homeTeamId,
+        awayTeamId: gameSchedule.awayTeamId,
+      })
+      .from(gameSchedule)
+      .where(and(
+        gte(gameSchedule.gameDate, startDate),
+        lte(gameSchedule.gameDate, endDate)
+      ));
+
+      // Get all team IDs from the games
+      const teamIds = [...new Set([
+        ...games.map(g => g.homeTeamId),
+        ...games.map(g => g.awayTeamId)
+      ])];
+
+      // Fetch team names
+      const teamNames = await db.select({
+        id: teams.id,
+        name: teams.name,
+      })
+      .from(teams)
+      .where(eq(teams.id, teamIds));
+
+      // Add team names to games
+      const gamesWithTeams = games.map(game => ({
+        ...game,
+        homeTeam: teamNames.find(t => t.id === game.homeTeamId)?.name,
+        awayTeam: teamNames.find(t => t.id === game.awayTeamId)?.name,
+      }));
+
+      res.json(gamesWithTeams);
+    } catch (error) {
+      console.error('Error fetching schedule:', error);
+      res.status(500).json({ error: 'Failed to fetch schedule' });
     }
   });
 
