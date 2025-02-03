@@ -25,6 +25,14 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
+interface Season {
+  id: number;
+  startDate: string;
+  endDate: string;
+  numberOfWeeks: number;
+  status: 'pending' | 'active' | 'completed';
+}
+
 interface Team {
   id: number;
   name: string;
@@ -71,6 +79,20 @@ export default function StatsPage() {
   const [selectedTeam, setSelectedTeam] = useState<string>("");
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
 
+  // Fetch current season
+  const { data: currentSeason, isLoading: seasonLoading } = useQuery<Season>({
+    queryKey: ['/api/season/current'],
+  });
+
+  // Get current week's schedule
+  const startDate = startOfWeek(new Date());
+  const endDate = endOfWeek(new Date());
+
+  const { data: schedule, isLoading: scheduleLoading } = useQuery<Game[]>({
+    queryKey: ['/api/schedule', { start: startDate.toISOString(), end: endDate.toISOString() }],
+    enabled: !!currentSeason,
+  });
+
   const { data: teams, isLoading: teamsLoading } = useQuery<Team[]>({
     queryKey: ['/api/teams'],
   });
@@ -90,62 +112,84 @@ export default function StatsPage() {
     enabled: !!selectedPlayer,
   });
 
-  // Get current week's schedule
-  const startDate = startOfWeek(new Date());
-  const endDate = endOfWeek(new Date());
-
-  const { data: schedule, isLoading: scheduleLoading } = useQuery<Game[]>({
-    queryKey: ['/api/schedule', { start: startDate.toISOString(), end: endDate.toISOString() }],
-  });
 
   return (
     <div className="container mx-auto py-6 space-y-8">
-      {/* Schedule Section */}
+      {/* Season Information */}
       <Card>
         <CardHeader>
-          <CardTitle>This Week's Schedule</CardTitle>
+          <CardTitle>Current Season</CardTitle>
           <CardDescription>
-            {format(startDate, 'MMM d')} - {format(endDate, 'MMM d, yyyy')}
+            {currentSeason 
+              ? `Week ${Math.ceil((new Date().getTime() - new Date(currentSeason.startDate).getTime()) / (7 * 24 * 60 * 60 * 1000))} of ${currentSeason.numberOfWeeks}`
+              : 'No active season'}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Game</TableHead>
-                <TableHead>Home Team</TableHead>
-                <TableHead>Away Team</TableHead>
-                <TableHead>Score</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {scheduleLoading ? (
-                <TableRow>
-                  <TableCell colSpan={5}><Skeleton className="h-4 w-full" /></TableCell>
-                </TableRow>
-              ) : schedule?.map((game) => (
-                <TableRow key={`${game.id}-${game.gameNumber}`}>
-                  <TableCell>{format(new Date(game.gameDate), 'MMM d')}</TableCell>
-                  <TableCell>{game.gameNumber}</TableCell>
-                  <TableCell>{game.homeTeam}</TableCell>
-                  <TableCell>{game.awayTeam}</TableCell>
-                  <TableCell>
-                    {game.homeScore !== null && game.awayScore !== null
-                      ? `${game.homeScore} - ${game.awayScore}`
-                      : 'TBD'}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {schedule?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center">
-                    No games scheduled this week
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          {seasonLoading ? (
+            <Skeleton className="h-20 w-full" />
+          ) : currentSeason ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm font-medium">Start Date</p>
+                  <p>{format(new Date(currentSeason.startDate), 'MMM d, yyyy')}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">End Date</p>
+                  <p>{format(new Date(currentSeason.endDate), 'MMM d, yyyy')}</p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="text-lg font-semibold mb-4">This Week's Schedule</h3>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Game</TableHead>
+                      <TableHead>Home Team</TableHead>
+                      <TableHead>Away Team</TableHead>
+                      <TableHead>Score</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {scheduleLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={5}><Skeleton className="h-4 w-full" /></TableCell>
+                      </TableRow>
+                    ) : schedule?.length ? (
+                      schedule.map((game) => (
+                        <TableRow key={`${game.id}-${game.gameNumber}`}>
+                          <TableCell>{format(new Date(game.gameDate), 'MMM d')}</TableCell>
+                          <TableCell>{game.gameNumber}</TableCell>
+                          <TableCell>{game.homeTeam}</TableCell>
+                          <TableCell>{game.awayTeam}</TableCell>
+                          <TableCell>
+                            {game.homeScore !== null && game.awayScore !== null
+                              ? `${game.homeScore} - ${game.awayScore}`
+                              : 'TBD'}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center">
+                          No games scheduled this week
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <p className="text-gray-500">
+                No active season. Use the Discord bot command <code>/startseason</code> to start a new season.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
