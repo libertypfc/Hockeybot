@@ -309,10 +309,16 @@ export const TeamCommands = [
       try {
         const teamRole = interaction.options.getRole('team', true);
 
-        // Get team information
-        const team = await db.query.teams.findFirst({
-          where: eq(teams.name, teamRole.name),
-        });
+        // Get team information with explicit field selection
+        const team = await db.select({
+          id: teams.id,
+          name: teams.name,
+          salaryCap: teams.salaryCap,
+          availableCap: teams.availableCap,
+        })
+        .from(teams)
+        .where(eq(teams.name, teamRole.name))
+        .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply('Team not found in database');
@@ -321,22 +327,27 @@ export const TeamCommands = [
         // Get all players on the team with their active contracts
         const teamPlayers = await db.query.players.findMany({
           where: eq(players.currentTeamId, team.id),
-          with: {
-            currentTeam: true,
+          columns: {
+            id: true,
+            username: true,
+            discordId: true,
           },
         });
 
         // Get active contracts for the team
-        const activeContracts = await db.query.contracts.findMany({
-          where: and(
-            eq(contracts.teamId, team.id),
-            eq(contracts.status, 'active')
-          ),
-        });
+        const activeContracts = await db.select({
+          playerId: contracts.playerId,
+          salary: contracts.salary,
+        })
+        .from(contracts)
+        .where(and(
+          eq(contracts.teamId, team.id),
+          eq(contracts.status, 'active')
+        ));
 
         // Calculate total salary
         const totalSalary = activeContracts.reduce((sum, contract) => sum + contract.salary, 0);
-        const availableCap = team.salaryCap - totalSalary;
+        const availableCap = (team.salaryCap ?? 0) - totalSalary;
 
         // Create embed for team information
         const embed = new EmbedBuilder()
@@ -346,7 +357,7 @@ export const TeamCommands = [
             { 
               name: 'Salary Cap Information', 
               value: 
-                `Total Cap: $${team.salaryCap.toLocaleString()}\n` +
+                `Total Cap: $${(team.salaryCap ?? 0).toLocaleString()}\n` +
                 `Used Cap: $${totalSalary.toLocaleString()}\n` +
                 `Available Cap: $${availableCap.toLocaleString()}`
             }
