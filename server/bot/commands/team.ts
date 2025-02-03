@@ -14,50 +14,60 @@ export const TeamCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      const teamName = interaction.options.getString('name', true);
+      // Defer the reply immediately to prevent timeout
+      await interaction.deferReply();
 
-      // Create category
-      const category = await interaction.guild?.channels.create({
-        name: teamName,
-        type: ChannelType.GuildCategory,
-      });
+      try {
+        const teamName = interaction.options.getString('name', true);
 
-      if (!category || !interaction.guild) {
-        return interaction.reply('Failed to create team category');
-      }
-
-      // Create text channels
-      const channels = [
-        ['team-chat', ChannelType.GuildText],
-        ['signing', ChannelType.GuildText],
-        ['roster', ChannelType.GuildText],
-        ['stats-pictures', ChannelType.GuildText],
-        ['team-voice', ChannelType.GuildVoice],
-      ] as const;
-
-      for (const [name, type] of channels) {
-        await interaction.guild.channels.create({
-          name,
-          type,
-          parent: category.id,
+        // Create category
+        const category = await interaction.guild?.channels.create({
+          name: teamName,
+          type: ChannelType.GuildCategory,
         });
+
+        if (!category || !interaction.guild) {
+          return interaction.editReply('Failed to create team category');
+        }
+
+        // Create text channels
+        const channels = [
+          ['team-chat', ChannelType.GuildText],
+          ['signing', ChannelType.GuildText],
+          ['roster', ChannelType.GuildText],
+          ['stats-pictures', ChannelType.GuildText],
+          ['team-voice', ChannelType.GuildVoice],
+        ] as const;
+
+        // Create all channels in parallel for better performance
+        await Promise.all(channels.map(([name, type]) => 
+          interaction.guild!.channels.create({
+            name,
+            type,
+            parent: category.id,
+          })
+        ));
+
+        // Create team role
+        const role = await interaction.guild.roles.create({
+          name: teamName,
+          mentionable: true,
+        });
+
+        // Save team to database
+        await db.insert(teams).values({
+          name: teamName,
+          discordCategoryId: category.id,
+          salaryCap: 82_500_000, // NHL salary cap as default
+          availableCap: 82_500_000,
+        });
+
+        await interaction.editReply(`Team ${teamName} has been created successfully with all channels and roles!`);
+      } catch (error) {
+        console.error('Error creating team:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to create team: ${errorMessage}`);
       }
-
-      // Create team role
-      const role = await interaction.guild.roles.create({
-        name: teamName,
-        mentionable: true,
-      });
-
-      // Save team to database
-      await db.insert(teams).values({
-        name: teamName,
-        discordCategoryId: category.id,
-        salaryCap: 82_500_000, // NHL salary cap as default
-        availableCap: 82_500_000,
-      });
-
-      await interaction.reply(`Team ${teamName} has been created with all channels and roles!`);
     },
   },
 ];

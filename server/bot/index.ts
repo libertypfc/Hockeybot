@@ -31,6 +31,10 @@ client.commands = new Collection();
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`Discord bot is ready! Logged in as ${c.user.tag}`);
+
+  // Wait a short time to ensure guilds are cached
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
   try {
     await registerCommands(client);
     console.log('All commands registered successfully!');
@@ -44,7 +48,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   const command = client.commands.get(interaction.commandName);
   if (!command) {
-    console.log(`Command not found: ${interaction.commandName}`);
+    console.error(`Command not found: ${interaction.commandName}`);
     return;
   }
 
@@ -52,8 +56,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await command.execute(interaction);
   } catch (error) {
     console.error(`Error executing command ${interaction.commandName}:`, error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     await interaction.reply({
-      content: 'There was an error executing this command!',
+      content: `There was an error executing this command: ${errorMessage}`,
       ephemeral: true,
     });
   }
