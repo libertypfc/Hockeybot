@@ -9,11 +9,6 @@ export const teams = pgTable("teams", {
   salaryCap: integer("salary_cap").default(82500000),
   capFloor: integer("cap_floor").default(3000000),
   availableCap: integer("available_cap").default(82500000),
-  wins: integer("wins").default(0),
-  losses: integer("losses").default(0),
-  overtimeLosses: integer("overtime_losses").default(0),
-  goalsFor: integer("goals_for").default(0),
-  goalsAgainst: integer("goals_against").default(0),
   metadata: text("metadata"),
 });
 
