@@ -8,31 +8,31 @@ export const TradeCommands = [
     data: new SlashCommandBuilder()
       .setName('trade')
       .setDescription('Trade a player between teams')
-      .addStringOption(option =>
+      .addRoleOption(option =>
         option.setName('from_team')
-          .setDescription('Team trading the player')
+          .setDescription('Team trading the player (use @team)')
           .setRequired(true))
       .addUserOption(option =>
         option.setName('player')
           .setDescription('Player being traded')
           .setRequired(true))
-      .addStringOption(option =>
+      .addRoleOption(option =>
         option.setName('to_team')
-          .setDescription('Team receiving the player')
+          .setDescription('Team receiving the player (use @team)')
           .setRequired(true)),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      const fromTeamName = interaction.options.getString('from_team', true);
-      const toTeamName = interaction.options.getString('to_team', true);
+      const fromTeamRole = interaction.options.getRole('from_team', true);
+      const toTeamRole = interaction.options.getRole('to_team', true);
       const user = interaction.options.getUser('player', true);
 
       // Validate teams
       const fromTeam = await db.query.teams.findFirst({
-        where: eq(teams.name, fromTeamName),
+        where: eq(teams.name, fromTeamRole.name),
       });
 
       const toTeam = await db.query.teams.findFirst({
-        where: eq(teams.name, toTeamName),
+        where: eq(teams.name, toTeamRole.name),
       });
 
       if (!fromTeam || !toTeam) {
@@ -56,24 +56,20 @@ export const TradeCommands = [
       // Update Discord roles
       const member = await interaction.guild?.members.fetch(user.id);
 
-      const oldRole = interaction.guild?.roles.cache.find(
-        (role: Role) => role.name === fromTeamName
-      );
+      if (member) {
+        // Remove old team role
+        if (fromTeamRole) {
+          await member.roles.remove(fromTeamRole);
+        }
 
-      const newRole = interaction.guild?.roles.cache.find(
-        (role: Role) => role.name === toTeamName
-      );
-
-      if (oldRole && member) {
-        await member.roles.remove(oldRole);
-      }
-
-      if (newRole && member) {
-        await member.roles.add(newRole);
+        // Add new team role
+        if (toTeamRole) {
+          await member.roles.add(toTeamRole);
+        }
       }
 
       await interaction.reply(
-        `${user} has been traded from ${fromTeamName} to ${toTeamName}`
+        `${user} has been traded from ${fromTeamRole} to ${toTeamRole}`
       );
     },
   },

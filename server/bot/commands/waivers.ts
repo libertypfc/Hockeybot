@@ -53,7 +53,10 @@ export const WaiversCommands = [
 
       // Update player status
       await db.update(players)
-        .set({ status: 'waivers' })
+        .set({ 
+          currentTeamId: null,
+          status: 'waivers' 
+        })
         .where(eq(players.id, player.id));
 
       await interaction.reply(
