@@ -14,41 +14,44 @@ export function registerRoutes(app: Express): Server {
   // API Routes
   app.get('/api/teams', async (_req, res) => {
     try {
-      const allTeams = await db.query.teams.findMany({
-        with: {
-          players: true,
-        },
+      // Get all teams first
+      const allTeams = await db.query.teams.findMany();
+
+      // Get all players with their team affiliations
+      const allPlayers = await db.query.players.findMany({
+        where: eq(players.status, 'signed'),
       });
 
-      // Get active contracts for each team
-      const teamsWithDetails = await Promise.all(
-        allTeams.map(async (team) => {
-          const activeContracts = await db.query.contracts.findMany({
-            where: eq(contracts.teamId, team.id),
-          });
+      // Get all active contracts
+      const activeContracts = await db.query.contracts.findMany({
+        where: eq(contracts.status, 'active'),
+      });
 
-          // Calculate total salary excluding exempt players
-          const totalSalary = activeContracts.reduce((sum, contract) => {
-            const player = team.players.find(p => p.id === contract.playerId);
-            return sum + (player?.salaryExempt ? 0 : contract.salary);
-          }, 0);
+      // Calculate team details
+      const teamsWithDetails = allTeams.map(team => {
+        const teamPlayers = allPlayers.filter(p => p.currentTeamId === team.id);
+        const teamContracts = activeContracts.filter(c => c.teamId === team.id);
 
-          const availableCap = team.salaryCap! - totalSalary;
+        // Calculate total salary excluding exempt players
+        const totalSalary = teamContracts.reduce((sum, contract) => {
+          const player = teamPlayers.find(p => p.id === contract.playerId);
+          return sum + (player?.salaryExempt ? 0 : contract.salary);
+        }, 0);
 
-          const exemptPlayers = team.players.filter(player => player.salaryExempt);
+        const availableCap = team.salaryCap! - totalSalary;
+        const exemptPlayers = teamPlayers.filter(p => p.salaryExempt);
 
-          return {
-            ...team,
-            totalSalary,
-            availableCap,
-            playerCount: team.players.length,
-            exemptPlayers: exemptPlayers.map(p => ({ 
-              username: p.username,
-              discordId: p.discordId 
-            })),
-          };
-        })
-      );
+        return {
+          ...team,
+          totalSalary,
+          availableCap,
+          playerCount: teamPlayers.length,
+          exemptPlayers: exemptPlayers.map(p => ({
+            username: p.username,
+            discordId: p.discordId,
+          })),
+        };
+      });
 
       res.json(teamsWithDetails);
     } catch (error) {
@@ -57,7 +60,7 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // New endpoint to get all players
+  // Get all players
   app.get('/api/players', async (_req, res) => {
     try {
       const allPlayers = await db.select({
@@ -75,14 +78,17 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // New endpoint to get team roster
+  // Get team roster
   app.get('/api/teams/:teamId/roster', async (req, res) => {
     try {
       const teamId = parseInt(req.params.teamId);
+
+      // Get players on this team
       const teamPlayers = await db.query.players.findMany({
         where: eq(players.currentTeamId, teamId),
       });
 
+      // Get active contracts for this team
       const activeContracts = await db.query.contracts.findMany({
         where: and(
           eq(contracts.teamId, teamId),
@@ -108,21 +114,21 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // New endpoint to toggle player exemption
+  // Toggle player salary exemption
   app.post('/api/teams/:teamId/exempt/:playerId', async (req, res) => {
     try {
       const teamId = parseInt(req.params.teamId);
       const playerId = parseInt(req.params.playerId);
 
-      // Get current exempt players count
-      const exemptPlayersCount = await db.query.players.findMany({
+      // Get current exempt players for this team
+      const exemptPlayers = await db.query.players.findMany({
         where: and(
           eq(players.currentTeamId, teamId),
           eq(players.salaryExempt, true)
         ),
       });
 
-      // Get player's current status
+      // Get the player we want to update
       const player = await db.query.players.findFirst({
         where: eq(players.id, playerId),
       });
@@ -131,7 +137,8 @@ export function registerRoutes(app: Express): Server {
         return res.status(404).json({ error: 'Player not found' });
       }
 
-      if (exemptPlayersCount.length >= 2 && !player.salaryExempt) {
+      // Check if we can make this player exempt
+      if (exemptPlayers.length >= 2 && !player.salaryExempt) {
         return res.status(400).json({ error: 'Team already has 2 salary exempt players' });
       }
 
