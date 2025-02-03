@@ -52,5 +52,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 export function startBot() {
-  client.login(process.env.DISCORD_TOKEN);
+  client.login(process.env.DISCORD_TOKEN)
+    .then(() => {
+      console.log('Bot successfully logged in!');
+    })
+    .catch((error) => {
+      console.error('Failed to start the bot:', error);
+      throw error;
+    });
 }
