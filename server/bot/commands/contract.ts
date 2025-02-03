@@ -60,9 +60,8 @@ export const ContractCommands = [
               .setRequired(true))
           .addIntegerOption(option =>
             option.setName('length')
-              .setDescription('Contract length in days')
+              .setDescription('Contract length in weeks')
               .setRequired(true))),
-
     async execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
 
@@ -100,9 +99,11 @@ export const ContractCommands = [
           // Convert input from millions to actual dollars
           const salaryInMillions = interaction.options.getInteger('salary', true);
           salary = salaryInMillions * 1_000_000;
-          length = interaction.options.getInteger('length', true);
+          // Convert weeks to days for storage
+          const weeks = interaction.options.getInteger('length', true);
+          length = weeks * 7;
           title = 'Contract Offer';
-          lengthDisplay = `${length} days`;
+          lengthDisplay = `${weeks} week${weeks !== 1 ? 's' : ''}`;
         }
 
         const availableCap = team.availableCap ?? 0;
