@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { startBot } from './bot';
 import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
@@ -58,6 +58,81 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Error fetching teams:', error);
       res.status(500).json({ error: 'Failed to fetch teams' });
+    }
+  });
+
+  // New endpoint to get team roster
+  app.get('/api/teams/:teamId/roster', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId);
+      const players = await db.query.players.findMany({
+        where: eq(players.currentTeamId, teamId),
+        with: {
+          currentTeam: true,
+        },
+      });
+
+      const activeContracts = await db.query.contracts.findMany({
+        where: and(
+          eq(contracts.teamId, teamId),
+          eq(contracts.status, 'active')
+        ),
+      });
+
+      const roster = players.map(player => {
+        const contract = activeContracts.find(c => c.playerId === player.id);
+        return {
+          id: player.id,
+          username: player.username,
+          discordId: player.discordId,
+          salaryExempt: player.salaryExempt,
+          salary: contract?.salary || 0,
+        };
+      });
+
+      res.json(roster);
+    } catch (error) {
+      console.error('Error fetching team roster:', error);
+      res.status(500).json({ error: 'Failed to fetch team roster' });
+    }
+  });
+
+  // New endpoint to toggle player exemption
+  app.post('/api/teams/:teamId/exempt/:playerId', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId);
+      const playerId = parseInt(req.params.playerId);
+
+      // Get current exempt players count
+      const exemptCount = await db.query.players.count({
+        where: and(
+          eq(players.currentTeamId, teamId),
+          eq(players.salaryExempt, true)
+        ),
+      });
+
+      // Get player's current status
+      const player = await db.query.players.findFirst({
+        where: eq(players.id, playerId),
+      });
+
+      if (!player) {
+        return res.status(404).json({ error: 'Player not found' });
+      }
+
+      if (exemptCount >= 2 && !player.salaryExempt) {
+        return res.status(400).json({ error: 'Team already has 2 salary exempt players' });
+      }
+
+      // Toggle exemption
+      await db.update(players)
+        .set({ salaryExempt: !player.salaryExempt })
+        .where(eq(players.id, playerId));
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error updating player exemption:', error);
+      res.status(500).json({ error: 'Failed to update player exemption' });
     }
   });
 
