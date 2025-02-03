@@ -827,4 +827,126 @@ export const TeamCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('setcap')
+      .setDescription('Set a team\'s salary cap')
+      .addRoleOption(option =>
+        option.setName('team')
+          .setDescription('The team to modify (use @team)')
+          .setRequired(true))
+      .addIntegerOption(option =>
+        option.setName('amount')
+          .setDescription('New salary cap amount')
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const teamRole = interaction.options.getRole('team', true);
+        const newCap = interaction.options.getInteger('amount', true);
+
+        if (newCap < 0) {
+          return interaction.editReply('Salary cap cannot be negative.');
+        }
+
+        const team = await db.select({
+          id: teams.id,
+          name: teams.name,
+          salaryCap: teams.salaryCap,
+        })
+        .from(teams)
+        .where(eq(teams.name, teamRole.name))
+        .then(rows => rows[0]);
+
+        if (!team) {
+          return interaction.editReply('Team not found in database');
+        }
+
+        await db.update(teams)
+          .set({ salaryCap: newCap })
+          .where(eq(teams.id, team.id));
+
+        const embed = new EmbedBuilder()
+          .setTitle('Salary Cap Updated')
+          .setDescription(`Updated salary cap for ${team.name}`)
+          .addFields(
+            { name: 'Previous Cap', value: `$${(team.salaryCap ?? 0).toLocaleString()}` },
+            { name: 'New Cap', value: `$${newCap.toLocaleString()}` }
+          )
+          .setColor('#00FF00')
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error('Error setting salary cap:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to set salary cap: ${errorMessage}`);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('setfloor')
+      .setDescription('Set a team\'s salary cap floor')
+      .addRoleOption(option =>
+        option.setName('team')
+          .setDescription('The team to modify (use @team)')
+          .setRequired(true))
+      .addIntegerOption(option =>
+        option.setName('amount')
+          .setDescription('New salary cap floor amount')
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const teamRole = interaction.options.getRole('team', true);
+        const newFloor = interaction.options.getInteger('amount', true);
+
+        if (newFloor < 0) {
+          return interaction.editReply('Salary cap floor cannot be negative.');
+        }
+
+        const team = await db.select({
+          id: teams.id,
+          name: teams.name,
+          capFloor: teams.capFloor,
+        })
+        .from(teams)
+        .where(eq(teams.name, teamRole.name))
+        .then(rows => rows[0]);
+
+        if (!team) {
+          return interaction.editReply('Team not found in database');
+        }
+
+        await db.update(teams)
+          .set({ capFloor: newFloor })
+          .where(eq(teams.id, team.id));
+
+        const embed = new EmbedBuilder()
+          .setTitle('Salary Cap Floor Updated')
+          .setDescription(`Updated salary cap floor for ${team.name}`)
+          .addFields(
+            { name: 'Previous Floor', value: `$${(team.capFloor ?? 0).toLocaleString()}` },
+            { name: 'New Floor', value: `$${newFloor.toLocaleString()}` }
+          )
+          .setColor('#00FF00')
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error('Error setting salary cap floor:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to set salary cap floor: ${errorMessage}`);
+      }
+    },
+  },
 ];
