@@ -15,7 +15,17 @@ export function registerRoutes(app: Express): Server {
   app.get('/api/teams', async (_req, res) => {
     try {
       // Get all teams first
-      const allTeams = await db.query.teams.findMany();
+      const allTeams = await db.select({
+        id: teams.id,
+        name: teams.name,
+        salaryCap: teams.salaryCap,
+        availableCap: teams.availableCap,
+      }).from(teams);
+
+      if (allTeams.length === 0) {
+        // Return empty array if no teams exist yet
+        return res.json([]);
+      }
 
       // Get all players with their team affiliations
       const allPlayers = await db.select({
@@ -29,9 +39,14 @@ export function registerRoutes(app: Express): Server {
       .where(eq(players.status, 'signed'));
 
       // Get all active contracts
-      const activeContracts = await db.select()
-        .from(contracts)
-        .where(eq(contracts.status, 'active'));
+      const activeContracts = await db.select({
+        id: contracts.id,
+        playerId: contracts.playerId,
+        teamId: contracts.teamId,
+        salary: contracts.salary,
+      })
+      .from(contracts)
+      .where(eq(contracts.status, 'active'));
 
       // Calculate team details
       const teamsWithDetails = allTeams.map(team => {
@@ -44,7 +59,7 @@ export function registerRoutes(app: Express): Server {
           return sum + (player?.salaryExempt ? 0 : contract.salary);
         }, 0);
 
-        const availableCap = team.salaryCap! - totalSalary;
+        const availableCap = (team.salaryCap ?? 0) - totalSalary;
         const exemptPlayers = teamPlayers.filter(p => p.salaryExempt);
 
         return {
