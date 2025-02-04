@@ -36,6 +36,7 @@ class ReliableDiscordClient extends Client {
   private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
   private lastError?: Error;
   private processStartTime: number = Date.now();
+  private wsCloseTimeout?: NodeJS.Timeout;
 
   constructor() {
     super({
@@ -73,6 +74,20 @@ class ReliableDiscordClient extends Client {
       this.reconnectAttempts = 0;
       this.startAllMonitors();
     });
+
+    // Handle WebSocket close
+    this.ws?.on('close', () => {
+      this.log('WebSocket', 'Connection closed');
+      if (this.wsCloseTimeout) {
+        clearTimeout(this.wsCloseTimeout);
+      }
+      this.wsCloseTimeout = setTimeout(() => {
+        if (this.connectionState !== ConnectionState.CONNECTED) {
+          this.log('WebSocket', 'Connection not restored, forcing reconnect');
+          this.attemptReconnect(true);
+        }
+      }, 3000); // Wait 3 seconds before forcing reconnect
+    });
   }
 
   private setupProcessHandlers() {
@@ -105,7 +120,8 @@ class ReliableDiscordClient extends Client {
       this.watchdogInterval,
       this.connectionCheckInterval,
       this.stateCheckInterval,
-      this.forcedReconnectTimeout
+      this.forcedReconnectTimeout,
+      this.wsCloseTimeout
     ].forEach(interval => {
       if (interval) clearInterval(interval);
     });
@@ -133,7 +149,7 @@ class ReliableDiscordClient extends Client {
         this.log('Connection', 'Bot is not ready, initiating reconnection...');
         this.attemptReconnect(true);
       }
-    }, 5000);
+    }, 3000); // Check every 3 seconds
   }
 
   private startHeartbeat() {
@@ -150,16 +166,16 @@ class ReliableDiscordClient extends Client {
           this.attemptReconnect(true);
         }
       }
-    }, 10000);
+    }, 3000); // Heartbeat every 3 seconds
 
     this.watchdogInterval = setInterval(() => {
       const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-      if (timeSinceLastHeartbeat > 20000 && 
+      if (timeSinceLastHeartbeat > 7000 && 
           this.connectionState !== ConnectionState.RECONNECTING) {
         this.log('Watchdog', 'Detected stale connection, forcing reconnect...');
         this.attemptReconnect(true);
       }
-    }, 5000);
+    }, 3000); // Check every 3 seconds
   }
 
   private async handleUncaughtError(error: Error) {
