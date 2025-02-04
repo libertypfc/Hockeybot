@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, ChannelType, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { db } from '@db';
-import { players, waivers, waiverSettings } from '@db/schema';
+import { players, waivers, waiverSettings, teams, contracts } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export const WaiversCommands = [
@@ -158,80 +158,101 @@ export const WaiversCommands = [
           .setRequired(true)),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      const user = interaction.options.getUser('player', true);
+      await interaction.deferReply();
 
-      // Get player and their current team
-      const player = await db.query.players.findFirst({
-        where: eq(players.discordId, user.id),
-        with: {
-          currentTeam: true,
-        },
-      });
+      try {
+        const user = interaction.options.getUser('player', true);
 
-      if (!player || !player.currentTeam) {
-        return interaction.reply('Player is not signed to any team');
-      }
+        // Get player, their current team, and active contract
+        const player = await db.query.players.findFirst({
+          where: eq(players.discordId, user.id),
+          with: {
+            currentTeam: true,
+            contracts: {
+              where: eq(contracts.status, 'active'),
+            },
+          },
+        });
 
-      // Calculate waiver period
-      const startTime = new Date();
-      const endTime = new Date();
-      endTime.setHours(endTime.getHours() + 48); // 48 hour default period
-
-      // Create waiver entry
-      await db.insert(waivers).values({
-        playerId: player.id,
-        fromTeamId: player.currentTeamId!,
-        startTime,
-        endTime,
-      });
-
-      // Remove team role
-      const member = await interaction.guild?.members.fetch(user.id);
-      const teamRole = interaction.guild?.roles.cache.find(
-        role => role.name === player.currentTeam?.name
-      );
-
-      if (teamRole && member) {
-        await member.roles.remove(teamRole);
-      }
-
-      // Update player status
-      await db.update(players)
-        .set({
-          currentTeamId: null,
-          status: 'waivers'
-        })
-        .where(eq(players.id, player.id));
-
-      // Get waiver notification settings
-      const settings = await db.query.waiverSettings.findFirst({
-        where: eq(waiverSettings.guildId, interaction.guildId!),
-      });
-
-      // Create waiver notification embed
-      const waiverEmbed = new EmbedBuilder()
-        .setTitle('🚨 Player Added to Waivers')
-        .setDescription(`${user} has been placed on waivers by ${player.currentTeam.name}`)
-        .addFields(
-          { name: 'Waiver Period', value: `Ends <t:${Math.floor(endTime.getTime() / 1000)}:R>` }
-        )
-        .setTimestamp();
-
-      // Send notification if channel is configured
-      if (settings) {
-        const notificationChannel = await interaction.guild?.channels.fetch(settings.notificationChannelId);
-        if (notificationChannel?.isTextBased()) {
-          await notificationChannel.send({
-            content: `**🚨 Waiver Wire Alert!**\n<@&${settings.scoutRoleId}> <@&${settings.gmRoleId}>\nA new player is available on waivers!`,
-            embeds: [waiverEmbed],
-          });
+        if (!player || !player.currentTeam) {
+          return interaction.editReply('Player is not signed to any team');
         }
-      }
 
-      await interaction.reply({
-        content: `${user} has been placed on waivers. They will clear in 48 hours if unclaimed.`,
-        embeds: [waiverEmbed],
-      });
+        const activeContract = player.contracts[0];
+        if (!activeContract) {
+          return interaction.editReply('Player does not have an active contract');
+        }
+
+        // Calculate waiver period
+        const startTime = new Date();
+        const endTime = new Date();
+        endTime.setHours(endTime.getHours() + 48); // 48 hour default period
+
+        // Create waiver entry
+        await db.insert(waivers).values({
+          playerId: player.id,
+          fromTeamId: player.currentTeamId!,
+          startTime,
+          endTime,
+          contractId: activeContract.id, // Store contract reference
+        });
+
+        // Remove team role
+        const member = await interaction.guild?.members.fetch(user.id);
+        const teamRole = interaction.guild?.roles.cache.find(
+          role => role.name === player.currentTeam?.name
+        );
+
+        if (teamRole && member) {
+          await member.roles.remove(teamRole);
+        }
+
+        // Update player status but keep salary with original team
+        await db.update(players)
+          .set({
+            currentTeamId: null,
+            status: 'waivers'
+          })
+          .where(eq(players.id, player.id));
+
+        // Get waiver notification settings
+        const settings = await db.query.waiverSettings.findFirst({
+          where: eq(waiverSettings.guildId, interaction.guildId!),
+        });
+
+        const salary = player.salaryExempt ? 0 : activeContract.salary;
+
+        // Create waiver notification embed
+        const waiverEmbed = new EmbedBuilder()
+          .setTitle('🚨 Player Added to Waivers')
+          .setDescription(`${user} has been placed on waivers by ${player.currentTeam.name}`)
+          .addFields(
+            { name: 'Waiver Period', value: `Ends <t:${Math.floor(endTime.getTime() / 1000)}:R>` },
+            { name: 'Salary', value: `$${salary.toLocaleString()}` },
+            { name: 'Status', value: player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap' }
+          )
+          .setTimestamp();
+
+        // Send notification if channel is configured
+        if (settings) {
+          const notificationChannel = await interaction.guild?.channels.fetch(settings.notificationChannelId);
+          if (notificationChannel?.isTextBased()) {
+            await notificationChannel.send({
+              content: `**🚨 Waiver Wire Alert!**\n<@&${settings.scoutRoleId}> <@&${settings.gmRoleId}>\nA new player is available on waivers!`,
+              embeds: [waiverEmbed],
+            });
+          }
+        }
+
+        await interaction.editReply({
+          content: `${user} has been placed on waivers. They will clear in 48 hours if unclaimed.\nTheir ${player.salaryExempt ? 'exempt ' : ''}salary of $${salary.toLocaleString()} will remain with ${player.currentTeam.name} until claimed.`,
+          embeds: [waiverEmbed],
+        });
+
+      } catch (error) {
+        console.error('[Error] Error processing waiver release:', error);
+        await interaction.editReply('Failed to release player to waivers. Please try again.');
+      }
     },
   },
 ];

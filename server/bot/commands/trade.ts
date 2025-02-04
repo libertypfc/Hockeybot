@@ -1,7 +1,7 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
-import { players, teams } from '@db/schema';
-import { eq } from 'drizzle-orm';
+import { players, teams, contracts } from '@db/schema';
+import { eq, and } from 'drizzle-orm';
 
 export const TradeCommands = [
   {
@@ -22,67 +22,115 @@ export const TradeCommands = [
           .setRequired(true)),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      const fromTeamRole = interaction.options.getRole('from_team', true);
-      const toTeamRole = interaction.options.getRole('to_team', true);
-      const user = interaction.options.getUser('player', true);
+      await interaction.deferReply();
 
-      // Validate teams
-      const fromTeam = await db.select({
-        id: teams.id,
-        name: teams.name,
-      })
-      .from(teams)
-      .where(eq(teams.name, fromTeamRole.name))
-      .then(rows => rows[0]);
+      try {
+        const fromTeamRole = interaction.options.getRole('from_team', true);
+        const toTeamRole = interaction.options.getRole('to_team', true);
+        const user = interaction.options.getUser('player', true);
 
-      const toTeam = await db.select({
-        id: teams.id,
-        name: teams.name,
-      })
-      .from(teams)
-      .where(eq(teams.name, toTeamRole.name))
-      .then(rows => rows[0]);
+        // Get both teams with their cap information
+        const fromTeam = await db.select({
+          id: teams.id,
+          name: teams.name,
+          availableCap: teams.availableCap,
+          salaryCap: teams.salaryCap,
+        })
+        .from(teams)
+        .where(eq(teams.name, fromTeamRole.name))
+        .then(rows => rows[0]);
 
-      if (!fromTeam || !toTeam) {
-        return interaction.reply('Invalid team name(s)');
-      }
+        const toTeam = await db.select({
+          id: teams.id,
+          name: teams.name,
+          availableCap: teams.availableCap,
+          salaryCap: teams.salaryCap,
+        })
+        .from(teams)
+        .where(eq(teams.name, toTeamRole.name))
+        .then(rows => rows[0]);
 
-      // Get player
-      const player = await db.select({
-        id: players.id,
-        discordId: players.discordId,
-      })
-      .from(players)
-      .where(eq(players.discordId, user.id))
-      .then(rows => rows[0]);
-
-      if (!player) {
-        return interaction.reply('Player not found in database');
-      }
-
-      // Update player's team
-      await db.update(players)
-        .set({ currentTeamId: toTeam.id })
-        .where(eq(players.id, player.id));
-
-      // Update Discord roles
-      const member = await interaction.guild?.members.fetch(user.id);
-
-      if (member) {
-        // Remove old team role
-        if ('id' in fromTeamRole) {
-          await member.roles.remove(fromTeamRole.id);
+        if (!fromTeam || !toTeam) {
+          return interaction.editReply('Invalid team name(s)');
         }
 
-        // Add new team role
-        if ('id' in toTeamRole) {
-          await member.roles.add(toTeamRole.id);
-        }
-      }
+        // Get player and their active contract
+        const player = await db.query.players.findFirst({
+          where: and(
+            eq(players.discordId, user.id),
+            eq(players.currentTeamId, fromTeam.id)
+          ),
+          with: {
+            contracts: {
+              where: eq(contracts.status, 'active'),
+            },
+          },
+        });
 
-      await interaction.reply(
-        `${user} has been traded from ${fromTeamRole} to ${toTeamRole}`
-      );
+        if (!player) {
+          return interaction.editReply('Player not found or not on the trading team');
+        }
+
+        const activeContract = player.contracts[0];
+        if (!activeContract) {
+          return interaction.editReply('Player does not have an active contract');
+        }
+
+        const playerSalary = player.salaryExempt ? 0 : activeContract.salary;
+
+        // Check if receiving team has enough cap space
+        if (toTeam.availableCap! < playerSalary) {
+          return interaction.editReply(`${toTeamRole} does not have enough cap space for this trade. They need $${playerSalary.toLocaleString()} in space.`);
+        }
+
+        // Update team cap space
+        await db.update(teams)
+          .set({
+            availableCap: fromTeam.availableCap! + playerSalary
+          })
+          .where(eq(teams.id, fromTeam.id));
+
+        await db.update(teams)
+          .set({
+            availableCap: toTeam.availableCap! - playerSalary
+          })
+          .where(eq(teams.id, toTeam.id));
+
+        // Update player's team and contract
+        await db.update(players)
+          .set({ currentTeamId: toTeam.id })
+          .where(eq(players.id, player.id));
+
+        await db.update(contracts)
+          .set({ teamId: toTeam.id })
+          .where(eq(contracts.id, activeContract.id));
+
+        // Update Discord roles
+        const member = await interaction.guild?.members.fetch(user.id);
+        if (member) {
+          if ('id' in fromTeamRole) {
+            await member.roles.remove(fromTeamRole.id);
+          }
+          if ('id' in toTeamRole) {
+            await member.roles.add(toTeamRole.id);
+          }
+        }
+
+        const tradeEmbed = new EmbedBuilder()
+          .setTitle('🔄 Trade Completed')
+          .setDescription(`${user} has been traded from ${fromTeamRole} to ${toTeamRole}`)
+          .addFields(
+            { name: 'Salary', value: `$${playerSalary.toLocaleString()}`, inline: true },
+            { name: `${fromTeam.name} Cap Space`, value: `$${(fromTeam.availableCap! + playerSalary).toLocaleString()}`, inline: true },
+            { name: `${toTeam.name} Cap Space`, value: `$${(toTeam.availableCap! - playerSalary).toLocaleString()}`, inline: true }
+          )
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [tradeEmbed] });
+      } catch (error) {
+        console.error('[Error] Error processing trade:', error);
+        await interaction.editReply('Failed to process trade. Please try again.');
+      }
     },
   },
 ];
