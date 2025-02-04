@@ -14,6 +14,14 @@ declare module 'discord.js' {
   }
 }
 
+enum ConnectionState {
+  DISCONNECTED = 'DISCONNECTED',
+  CONNECTING = 'CONNECTING',
+  CONNECTED = 'CONNECTED',
+  RECONNECTING = 'RECONNECTING',
+  ERROR = 'ERROR'
+}
+
 class ReliableDiscordClient extends Client {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 20;
@@ -21,10 +29,13 @@ class ReliableDiscordClient extends Client {
   private heartbeatInterval?: NodeJS.Timeout;
   private watchdogInterval?: NodeJS.Timeout;
   private connectionCheckInterval?: NodeJS.Timeout;
+  private stateCheckInterval?: NodeJS.Timeout;
   private isShuttingDown: boolean = false;
   private lastHeartbeat: number = Date.now();
   private forcedReconnectTimeout?: NodeJS.Timeout;
-  private isReconnecting: boolean = false;
+  private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
+  private lastError?: Error;
+  private processStartTime: number = Date.now();
 
   constructor() {
     super({
@@ -46,89 +57,156 @@ class ReliableDiscordClient extends Client {
     });
 
     this.commands = new Collection();
+    this.setupEventHandlers();
+    this.setupProcessHandlers();
+  }
 
-    // Enhanced error logging and connection management
+  private setupEventHandlers() {
     this.on('error', this.handleError.bind(this));
-    this.on('debug', (message) => console.log(`[Debug] ${message}`));
-    this.on('warn', (message) => console.warn(`[Warning] ${message}`));
+    this.on('debug', (message) => this.log('Debug', message));
+    this.on('warn', (message) => this.log('Warning', message));
     this.on('disconnect', this.handleDisconnect.bind(this));
-    this.on('reconnecting', () => console.log('[Status] Bot is reconnecting...'));
+    this.on('reconnecting', () => this.setConnectionState(ConnectionState.RECONNECTING));
     this.on('ready', () => {
-      console.log('[Status] Bot is ready and connected!');
+      this.setConnectionState(ConnectionState.CONNECTED);
       this.lastHeartbeat = Date.now();
       this.reconnectAttempts = 0;
-      this.isReconnecting = false;
-      this.startConnectionCheck();
+      this.startAllMonitors();
     });
+  }
 
-    // Handle process termination
-    process.on('SIGINT', () => this.handleShutdown());
-    process.on('SIGTERM', () => this.handleShutdown());
-    process.on('uncaughtException', this.handleUncaughtError.bind(this));
-    process.on('unhandledRejection', this.handleUncaughtError.bind(this));
+  private setupProcessHandlers() {
+    process.on('SIGINT', () => this.handleShutdown('SIGINT'));
+    process.on('SIGTERM', () => this.handleShutdown('SIGTERM'));
+    process.on('uncaughtException', (error) => this.handleUncaughtError(error));
+    process.on('unhandledRejection', (error) => this.handleUncaughtError(error as Error));
+  }
+
+  private log(level: string, message: string, error?: Error) {
+    const timestamp = new Date().toISOString();
+    const errorStack = error ? `\n${error.stack}` : '';
+    console.log(`[${timestamp}] [${level}] ${message}${errorStack}`);
+  }
+
+  private setConnectionState(state: ConnectionState) {
+    this.connectionState = state;
+    this.log('State', `Connection state changed to ${state}`);
+  }
+
+  private startAllMonitors() {
+    this.startHeartbeat();
+    this.startConnectionCheck();
+    this.startStateCheck();
+  }
+
+  private clearAllIntervals() {
+    [
+      this.heartbeatInterval,
+      this.watchdogInterval,
+      this.connectionCheckInterval,
+      this.stateCheckInterval,
+      this.forcedReconnectTimeout
+    ].forEach(interval => {
+      if (interval) clearInterval(interval);
+    });
+  }
+
+  private startStateCheck() {
+    if (this.stateCheckInterval) clearInterval(this.stateCheckInterval);
+
+    this.stateCheckInterval = setInterval(() => {
+      const uptime = Math.floor((Date.now() - this.processStartTime) / 1000);
+      this.log('Status', `Bot Status Report:
+        State: ${this.connectionState}
+        Uptime: ${uptime}s
+        Last Heartbeat: ${Date.now() - this.lastHeartbeat}ms ago
+        Reconnect Attempts: ${this.reconnectAttempts}
+        Last Error: ${this.lastError?.message || 'None'}`);
+    }, 30000);
   }
 
   private startConnectionCheck() {
-    if (this.connectionCheckInterval) {
-      clearInterval(this.connectionCheckInterval);
-    }
+    if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval);
 
-    // Check connection status every 10 seconds
     this.connectionCheckInterval = setInterval(() => {
-      if (!this.isReady() && !this.isReconnecting) {
-        console.log('[Connection] Bot is not ready, initiating reconnection...');
+      if (!this.isReady() && this.connectionState !== ConnectionState.RECONNECTING) {
+        this.log('Connection', 'Bot is not ready, initiating reconnection...');
         this.attemptReconnect(true);
       }
-    }, 10000);
+    }, 5000);
   }
 
-  private handleUncaughtError(error: Error) {
-    console.error('[Critical Error] Uncaught error:', error);
-    if (!this.isShuttingDown && !this.isReconnecting) {
-      this.attemptReconnect(true);
+  private startHeartbeat() {
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+    if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+
+    this.heartbeatInterval = setInterval(() => {
+      if (this.isReady()) {
+        this.lastHeartbeat = Date.now();
+        this.log('Heartbeat', 'Connection alive');
+      } else {
+        this.log('Heartbeat', 'Check failed, connection may be dead');
+        if (this.connectionState !== ConnectionState.RECONNECTING) {
+          this.attemptReconnect(true);
+        }
+      }
+    }, 10000);
+
+    this.watchdogInterval = setInterval(() => {
+      const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
+      if (timeSinceLastHeartbeat > 20000 && 
+          this.connectionState !== ConnectionState.RECONNECTING) {
+        this.log('Watchdog', 'Detected stale connection, forcing reconnect...');
+        this.attemptReconnect(true);
+      }
+    }, 5000);
+  }
+
+  private async handleUncaughtError(error: Error) {
+    this.lastError = error;
+    this.log('Critical', 'Uncaught error', error);
+    this.setConnectionState(ConnectionState.ERROR);
+
+    if (!this.isShuttingDown && this.connectionState !== ConnectionState.RECONNECTING) {
+      await this.attemptReconnect(true);
     }
   }
 
   private async handleError(error: Error) {
-    console.error('[Error] Bot encountered an error:', error);
-    if (!this.isShuttingDown && !this.isReconnecting) {
+    this.lastError = error;
+    this.log('Error', 'Bot encountered an error', error);
+    this.setConnectionState(ConnectionState.ERROR);
+
+    if (!this.isShuttingDown && this.connectionState !== ConnectionState.RECONNECTING) {
       await this.attemptReconnect(true);
     }
   }
 
   private async handleDisconnect() {
-    console.log('[Status] Bot disconnected from Discord');
-    if (!this.isShuttingDown && !this.isReconnecting) {
+    this.log('Status', 'Bot disconnected from Discord');
+    this.setConnectionState(ConnectionState.DISCONNECTED);
+
+    if (!this.isShuttingDown && this.connectionState !== ConnectionState.RECONNECTING) {
       await this.attemptReconnect(true);
     }
   }
 
   private async attemptReconnect(force: boolean = false) {
-    if (this.isShuttingDown || this.isReconnecting) return;
+    if (this.isShuttingDown || this.connectionState === ConnectionState.RECONNECTING) return;
 
-    this.isReconnecting = true;
-    console.log('[Recovery] Starting reconnection process...');
+    this.setConnectionState(ConnectionState.RECONNECTING);
+    this.log('Recovery', 'Starting reconnection process...');
 
     if (force) {
-      console.log('[Recovery] Forcing immediate reconnection attempt...');
+      this.log('Recovery', 'Forcing immediate reconnection attempt...');
       this.reconnectAttempts = 0;
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[Recovery] Maximum reconnection attempts reached. Resetting client...');
-      try {
-        await this.destroy();
-        await this.login(process.env.DISCORD_TOKEN);
-        this.startHeartbeat();
-        this.startConnectionCheck();
-        this.isReconnecting = false;
-        return;
-      } catch (error) {
-        console.error('[Recovery] Failed to reset client:', error);
-        process.exit(1); // Force process restart on complete failure
-      }
+      this.log('Recovery', 'Maximum reconnection attempts reached. Resetting process...');
+      process.exit(1); // Force process restart through Replit
     }
 
     const delay = force ? 0 : this.baseDelay * Math.pow(1.5, this.reconnectAttempts);
-    console.log(`[Recovery] Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+    this.log('Recovery', `Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
 
     await new Promise(resolve => setTimeout(resolve, delay));
 
@@ -139,69 +217,60 @@ class ReliableDiscordClient extends Client {
 
       await this.login(process.env.DISCORD_TOKEN);
       this.lastHeartbeat = Date.now();
+      this.setConnectionState(ConnectionState.CONNECTED);
+
       if (!force) {
         this.reconnectAttempts = 0;
       }
-      console.log('[Recovery] Successfully reconnected to Discord!');
 
-      // Schedule a forced reconnect after 4 hours to prevent stale connections
+      // Schedule a forced reconnect after 2 hours
       if (this.forcedReconnectTimeout) {
         clearTimeout(this.forcedReconnectTimeout);
       }
       this.forcedReconnectTimeout = setTimeout(() => {
-        console.log('[Maintenance] Performing scheduled connection refresh...');
+        this.log('Maintenance', 'Performing scheduled connection refresh...');
         this.attemptReconnect(true);
-      }, 4 * 60 * 60 * 1000);
+      }, 2 * 60 * 60 * 1000);
 
-      this.isReconnecting = false;
     } catch (error) {
-      console.error('[Recovery] Reconnection attempt failed:', error);
+      this.lastError = error as Error;
+      this.log('Recovery', 'Reconnection attempt failed', error as Error);
       this.reconnectAttempts++;
-      this.isReconnecting = false;
+      this.setConnectionState(ConnectionState.ERROR);
       await this.attemptReconnect();
     }
   }
 
-  private startHeartbeat() {
-    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-    if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+  private async handleShutdown(signal: string) {
+    this.log('Shutdown', `Shutting down bot gracefully... (${signal})`);
+    this.isShuttingDown = true;
+    this.setConnectionState(ConnectionState.DISCONNECTED);
 
-    // Send heartbeat every 15 seconds
-    this.heartbeatInterval = setInterval(() => {
-      if (this.isReady()) {
-        this.lastHeartbeat = Date.now();
-        console.log('[Heartbeat] Connection alive');
-      } else {
-        console.log('[Heartbeat] Check failed, connection may be dead');
-        if (!this.isReconnecting) {
-          this.attemptReconnect(true);
-        }
-      }
-    }, 15000);
+    this.clearAllIntervals();
 
-    // Watchdog checks every 10 seconds
-    this.watchdogInterval = setInterval(() => {
-      const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-      if (timeSinceLastHeartbeat > 30000 && !this.isReconnecting) { // No heartbeat for 30 seconds
-        console.log('[Watchdog] Detected stale connection, forcing reconnect...');
-        this.attemptReconnect(true);
-      }
-    }, 10000);
+    try {
+      await this.destroy();
+      this.log('Shutdown', 'Bot shutdown complete');
+      process.exit(0);
+    } catch (error) {
+      this.log('Shutdown', 'Error during shutdown', error as Error);
+      process.exit(1);
+    }
   }
 
   async start() {
     try {
       await this.login(process.env.DISCORD_TOKEN);
-      this.startHeartbeat();
-      this.startConnectionCheck();
-      console.log('[Startup] Bot successfully started and connected!');
+      this.startAllMonitors();
+      this.log('Startup', 'Bot successfully started and connected!');
 
+      // Schedule first forced reconnect after 2 hours
       this.forcedReconnectTimeout = setTimeout(() => {
         this.attemptReconnect(true);
-      }, 4 * 60 * 60 * 1000);
+      }, 2 * 60 * 60 * 1000);
 
     } catch (error) {
-      console.error('[Startup] Failed to start the bot:', error);
+      this.log('Startup', 'Failed to start the bot', error as Error);
       await this.attemptReconnect(true);
     }
   }
@@ -234,7 +303,6 @@ async function checkExpiredContracts() {
 
           if (metadata.offerMessageId) {
             try {
-              // Try to find the message in all available channels
               const channels = await client.guilds.cache.first()?.channels.fetch();
               if (channels) {
                 for (const [, channel] of channels) {
@@ -290,12 +358,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
       .setTimestamp();
 
     try {
-      // Try to send DM first
       await member.user.send({ embeds: [welcomeEmbed] });
     } catch (error) {
       console.warn(`[Warning] Could not send welcome DM to ${member.user.tag}`, error);
 
-      // Get configured welcome channel
       const settings = await db.query.guildSettings.findFirst({
         where: eq(guildSettings.guildId, member.guild.id),
       });
@@ -305,7 +371,6 @@ client.on(Events.GuildMemberAdd, async (member) => {
         welcomeChannel = await member.guild.channels.fetch(settings.welcomeChannelId);
       }
 
-      // Fallback to finding a general channel if no channel is configured
       if (!welcomeChannel || welcomeChannel?.type !== ChannelType.GuildText) {
         const channels = await member.guild.channels.fetch();
         welcomeChannel = channels.find(channel =>
@@ -335,7 +400,6 @@ client.once(Events.ClientReady, async (c) => {
     await registerCommands(client);
     console.log('[Status] All commands registered successfully!');
 
-    // Set up periodic checks
     setInterval(checkExpiredContracts, 5 * 60 * 1000); // Every 5 minutes
     setInterval(() => checkCapCompliance(client), 15 * 60 * 1000); // Every 15 minutes
   } catch (error) {
