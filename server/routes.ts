@@ -25,7 +25,17 @@ export function registerRoutes(app: Express): Server {
       });
 
       const teamsWithStats = allTeams.map(team => {
-        const totalSalary = team.contracts.reduce((sum, contract) => sum + contract.salary, 0);
+        // Debug logging
+        console.log(`Processing team: ${team.name}`);
+        console.log(`Number of players: ${team.players.length}`);
+        console.log(`Number of active contracts: ${team.contracts.length}`);
+
+        // Calculate total salary only from active contracts
+        const totalSalary = team.contracts.reduce((sum, contract) => {
+          console.log(`Contract for team ${team.name}: ${contract.salary} (Status: ${contract.status}, End Date: ${contract.endDate})`);
+          return sum + contract.salary;
+        }, 0);
+
         const availableCap = (team.salaryCap || 82500000) - totalSalary;
 
         // Get exempt players
@@ -35,6 +45,11 @@ export function registerRoutes(app: Express): Server {
             username: player.username,
             discordId: player.discordId
           }));
+
+        console.log(`Team ${team.name} summary:`);
+        console.log(`- Total Salary: ${totalSalary}`);
+        console.log(`- Available Cap: ${availableCap}`);
+        console.log(`- Exempt Players: ${exemptPlayers.length}`);
 
         return {
           id: team.id,
