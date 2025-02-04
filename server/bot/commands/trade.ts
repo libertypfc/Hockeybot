@@ -76,14 +76,15 @@ export const TradeCommands = [
           return interaction.editReply('Player does not have an active contract');
         }
 
-        const playerSalary = player.salaryExempt ? 0 : activeContract.salary;
+        // Calculate salary impact based on player's exempt status
+        const playerSalary = activeContract.salary; // Always transfer full salary
 
         // Check if receiving team has enough cap space
-        if (toTeam.availableCap! < playerSalary) {
+        if (!player.salaryExempt && toTeam.availableCap! < playerSalary) {
           return interaction.editReply(`${toTeamRole} does not have enough cap space for this trade. They need $${playerSalary.toLocaleString()} in space.`);
         }
 
-        // Update team cap space
+        // Update team cap space - salary always moves with the player
         await db.update(teams)
           .set({
             availableCap: fromTeam.availableCap! + playerSalary
@@ -121,6 +122,7 @@ export const TradeCommands = [
           .setDescription(`${user} has been traded from ${fromTeamRole} to ${toTeamRole}`)
           .addFields(
             { name: 'Salary', value: `$${playerSalary.toLocaleString()}`, inline: true },
+            { name: 'Status', value: player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap', inline: true },
             { name: `${fromTeam.name} Cap Space`, value: `$${(fromTeam.availableCap! + playerSalary).toLocaleString()}`, inline: true },
             { name: `${toTeam.name} Cap Space`, value: `$${(toTeam.availableCap! - playerSalary).toLocaleString()}`, inline: true }
           )

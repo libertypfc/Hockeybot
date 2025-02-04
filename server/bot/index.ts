@@ -75,18 +75,34 @@ class ReliableDiscordClient extends Client {
       this.startAllMonitors();
     });
 
-    // Handle WebSocket close
-    this.ws?.on('close', () => {
-      this.log('WebSocket', 'Connection closed');
-      if (this.wsCloseTimeout) {
-        clearTimeout(this.wsCloseTimeout);
+    // Handle WebSocket events directly
+    this.ws?.on('close', (code: number) => {
+      console.log(`[WebSocket] Gateway connection closed with code ${code}`);
+
+      // Handle specific close codes
+      switch (code) {
+        case 1000: // Normal closure
+          console.log('[WebSocket] Normal closure, attempting reconnect');
+          break;
+        case 1001: // Going away
+          console.log('[WebSocket] Gateway server going away, will attempt reconnect');
+          break;
+        case 1006: // Abnormal closure
+          console.error('[WebSocket] Abnormal closure detected');
+          break;
+        default:
+          console.log(`[WebSocket] Unexpected close code: ${code}`);
       }
-      this.wsCloseTimeout = setTimeout(() => {
-        if (this.connectionState !== ConnectionState.CONNECTED) {
-          this.log('WebSocket', 'Connection not restored, forcing reconnect');
-          this.attemptReconnect(true);
-        }
-      }, 3000); // Wait 3 seconds before forcing reconnect
+
+      // Let the client's built-in reconnection handle it
+      if (code !== 1000) {
+        client.destroy().then(() => {
+          console.log('[WebSocket] Client destroyed, preparing reconnect');
+          client.login(process.env.DISCORD_TOKEN);
+        }).catch(err => {
+          console.error('[WebSocket] Error during client cleanup:', err);
+        });
+      }
     });
   }
 
@@ -170,8 +186,8 @@ class ReliableDiscordClient extends Client {
 
     this.watchdogInterval = setInterval(() => {
       const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-      if (timeSinceLastHeartbeat > 7000 && 
-          this.connectionState !== ConnectionState.RECONNECTING) {
+      if (timeSinceLastHeartbeat > 7000 &&
+        this.connectionState !== ConnectionState.RECONNECTING) {
         this.log('Watchdog', 'Detected stale connection, forcing reconnect...');
         this.attemptReconnect(true);
       }
@@ -570,10 +586,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-export function startBot() {
-  client.start()
-    .catch((error) => {
-      console.error('Critical error starting bot:', error);
-      throw error;
-    });
+export function startBot(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Add delay before starting to ensure server is ready
+    setTimeout(() => {
+      client.start()
+        .then(() => {
+          console.log('[Status] Bot started successfully');
+          resolve();
+        })
+        .catch((error) => {
+          console.error('[Error] Critical error starting bot:', error);
+          reject(error);
+        });
+    }, 2000); // 2 second delay
+  });
 }

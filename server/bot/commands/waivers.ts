@@ -188,16 +188,17 @@ export const WaiversCommands = [
         const endTime = new Date();
         endTime.setHours(endTime.getHours() + 48); // 48 hour default period
 
-        // Create waiver entry
+        // Create waiver entry with contract information
         await db.insert(waivers).values({
           playerId: player.id,
           fromTeamId: player.currentTeamId!,
           startTime,
           endTime,
-          contractId: activeContract.id, // Store contract reference
+          contractId: activeContract.id,
+          salary: activeContract.salary, // Store the salary with the waiver entry
         });
 
-        // Remove team role
+        // Remove team role but keep the salary with the team
         const member = await interaction.guild?.members.fetch(user.id);
         const teamRole = interaction.guild?.roles.cache.find(
           role => role.name === player.currentTeam?.name
@@ -207,7 +208,7 @@ export const WaiversCommands = [
           await member.roles.remove(teamRole);
         }
 
-        // Update player status but keep salary with original team
+        // Update player status but keep contract and salary with original team
         await db.update(players)
           .set({
             currentTeamId: null,
@@ -220,15 +221,13 @@ export const WaiversCommands = [
           where: eq(waiverSettings.guildId, interaction.guildId!),
         });
 
-        const salary = player.salaryExempt ? 0 : activeContract.salary;
-
         // Create waiver notification embed
         const waiverEmbed = new EmbedBuilder()
           .setTitle('🚨 Player Added to Waivers')
           .setDescription(`${user} has been placed on waivers by ${player.currentTeam.name}`)
           .addFields(
             { name: 'Waiver Period', value: `Ends <t:${Math.floor(endTime.getTime() / 1000)}:R>` },
-            { name: 'Salary', value: `$${salary.toLocaleString()}` },
+            { name: 'Salary', value: `$${activeContract.salary.toLocaleString()}` },
             { name: 'Status', value: player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap' }
           )
           .setTimestamp();
@@ -245,7 +244,7 @@ export const WaiversCommands = [
         }
 
         await interaction.editReply({
-          content: `${user} has been placed on waivers. They will clear in 48 hours if unclaimed.\nTheir ${player.salaryExempt ? 'exempt ' : ''}salary of $${salary.toLocaleString()} will remain with ${player.currentTeam.name} until claimed.`,
+          content: `${user} has been placed on waivers. They will clear in 48 hours if unclaimed.\nTheir salary of $${activeContract.salary.toLocaleString()} will remain with ${player.currentTeam.name} until claimed.`,
           embeds: [waiverEmbed],
         });
 
