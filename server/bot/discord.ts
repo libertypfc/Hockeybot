@@ -4,6 +4,7 @@ import { TeamCommands } from './commands/team';
 import { ContractCommands } from './commands/contract';
 import { TradeCommands } from './commands/trade';
 import { WaiversCommands } from './commands/waivers';
+import { handleTradeButtons } from './interactions/tradeButtons';
 
 const client = new Client({
   intents: [
@@ -41,6 +42,16 @@ export async function startBot() {
 
     // Handle interactions
     client.on(Events.InteractionCreate, async interaction => {
+      if (interaction.isButton()) {
+        if (interaction.customId.startsWith('accept_trade:') ||
+            interaction.customId.startsWith('reject_trade:') ||
+            interaction.customId.startsWith('approve_trade:') ||
+            interaction.customId.startsWith('reject_trade_admin:')) {
+          await handleTradeButtons(interaction);
+        }
+        return;
+      }
+
       if (!interaction.isChatInputCommand()) return;
 
       const command = commands.get(interaction.commandName);

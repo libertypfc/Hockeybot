@@ -210,13 +210,51 @@ export const gameScheduleRelations = relations(gameSchedule, ({ one }) => ({
   }),
 }));
 
-
 export const insertSeasonSchema = createInsertSchema(seasons);
 export const selectSeasonSchema = createSelectSchema(seasons);
 
 export const insertGameScheduleSchema = createInsertSchema(gameSchedule);
 export const selectGameScheduleSchema = createSelectSchema(gameSchedule);
 
+
+export const tradeAdminSettings = pgTable("trade_admin_settings", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").unique().notNull(),
+  adminChannelId: text("admin_channel_id").notNull(),
+});
+
+export const tradeProposals = pgTable("trade_proposals", {
+  id: serial("id").primaryKey(),
+  fromTeamId: integer("from_team_id").references(() => teams.id).notNull(),
+  toTeamId: integer("to_team_id").references(() => teams.id).notNull(),
+  playerId: integer("player_id").references(() => players.id).notNull(),
+  status: text("status").default("pending"), // pending, accepted, rejected, admin_approved, admin_rejected
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  messageId: text("message_id"), // Discord message ID for reference
+  adminMessageId: text("admin_message_id"), // Admin channel message ID
+});
+
+export const tradeProposalsRelations = relations(tradeProposals, ({ one }) => ({
+  fromTeam: one(teams, {
+    fields: [tradeProposals.fromTeamId],
+    references: [teams.id],
+  }),
+  toTeam: one(teams, {
+    fields: [tradeProposals.toTeamId],
+    references: [teams.id],
+  }),
+  player: one(players, {
+    fields: [tradeProposals.playerId],
+    references: [players.id],
+  }),
+}));
+
+export const insertTradeAdminSettingsSchema = createInsertSchema(tradeAdminSettings);
+export const selectTradeAdminSettingsSchema = createSelectSchema(tradeAdminSettings);
+
+export const insertTradeProposalSchema = createInsertSchema(tradeProposals);
+export const selectTradeProposalSchema = createSelectSchema(tradeProposals);
 
 export type PlayerStats = typeof playerStats.$inferSelect;
 export type GoalieStats = typeof goalieStats.$inferSelect;
@@ -229,3 +267,5 @@ export type GuildSettings = typeof guildSettings.$inferSelect;
 export type TeamStats = typeof teamStats.$inferSelect;
 export type Season = typeof seasons.$inferSelect;
 export type GameSchedule = typeof gameSchedule.$inferSelect;
+export type TradeAdminSettings = typeof tradeAdminSettings.$inferSelect;
+export type TradeProposal = typeof tradeProposals.$inferSelect;
