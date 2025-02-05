@@ -24,14 +24,21 @@ export function registerRoutes(app: Express): Server {
         }
       });
 
-      const teamsWithStats = allTeams.map(team => {
-        // Debug logging
-        console.log(`Processing team: ${team.name}`);
-        console.log(`Number of players: ${team.players.length}`);
-        console.log(`Number of active contracts: ${team.contracts.length}`);
+      const teamsWithStats = await Promise.all(allTeams.map(async team => {
+        // Get current active contracts only for players currently on this team
+        const currentTeamContracts = await db.query.contracts.findMany({
+          where: and(
+            eq(contracts.status, 'active'),
+            gte(contracts.endDate, new Date()),
+            sql`${contracts.playerId} IN (
+              SELECT id FROM ${players}
+              WHERE current_team_id = ${team.id}
+            )`
+          ),
+        });
 
-        // Calculate total salary only from active contracts
-        const totalSalary = team.contracts.reduce((sum, contract) => {
+        // Calculate total salary only from active contracts of current players
+        const totalSalary = currentTeamContracts.reduce((sum, contract) => {
           console.log(`Contract for team ${team.name}: ${contract.salary} (Status: ${contract.status}, End Date: ${contract.endDate})`);
           return sum + contract.salary;
         }, 0);
@@ -60,7 +67,7 @@ export function registerRoutes(app: Express): Server {
           playerCount: team.players.length,
           exemptPlayers: exemptPlayers
         };
-      });
+      }));
 
       res.json(teamsWithStats);
     } catch (error) {
