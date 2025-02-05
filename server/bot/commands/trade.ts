@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
 import { players, teams, contracts } from '@db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 export const TradeCommands = [
   {
@@ -30,25 +30,13 @@ export const TradeCommands = [
         const user = interaction.options.getUser('player', true);
 
         // Get both teams with their cap information
-        const fromTeam = await db.select({
-          id: teams.id,
-          name: teams.name,
-          availableCap: teams.availableCap,
-          salaryCap: teams.salaryCap,
-        })
-        .from(teams)
-        .where(eq(teams.name, fromTeamRole.name))
-        .then(rows => rows[0]);
+        const fromTeam = await db.query.teams.findFirst({
+          where: eq(teams.name, fromTeamRole.name),
+        });
 
-        const toTeam = await db.select({
-          id: teams.id,
-          name: teams.name,
-          availableCap: teams.availableCap,
-          salaryCap: teams.salaryCap,
-        })
-        .from(teams)
-        .where(eq(teams.name, toTeamRole.name))
-        .then(rows => rows[0]);
+        const toTeam = await db.query.teams.findFirst({
+          where: eq(teams.name, toTeamRole.name),
+        });
 
         if (!fromTeam || !toTeam) {
           return interaction.editReply('Invalid team name(s)');
@@ -60,42 +48,48 @@ export const TradeCommands = [
             eq(players.discordId, user.id),
             eq(players.currentTeamId, fromTeam.id)
           ),
-          with: {
-            contracts: {
-              where: eq(contracts.status, 'active'),
-            },
-          },
         });
 
         if (!player) {
           return interaction.editReply('Player not found or not on the trading team');
         }
 
-        const activeContract = player.contracts[0];
+        // Get active contract
+        const activeContract = await db.query.contracts.findFirst({
+          where: and(
+            eq(contracts.playerId, player.id),
+            eq(contracts.status, 'active')
+          ),
+        });
+
         if (!activeContract) {
           return interaction.editReply('Player does not have an active contract');
         }
 
-        // Calculate salary impact based on player's exempt status
-        const playerSalary = activeContract.salary; // Always transfer full salary
+        // Calculate salary impact
+        const playerSalary = activeContract.salary;
 
         // Check if receiving team has enough cap space
-        if (!player.salaryExempt && toTeam.availableCap! < playerSalary) {
+        if (!player.salaryExempt && (toTeam.availableCap ?? 0) < playerSalary) {
           return interaction.editReply(`${toTeamRole} does not have enough cap space for this trade. They need $${playerSalary.toLocaleString()} in space.`);
         }
 
-        // Update team cap space - salary always moves with the player
-        await db.update(teams)
-          .set({
-            availableCap: fromTeam.availableCap! + playerSalary
-          })
-          .where(eq(teams.id, fromTeam.id));
+        // Update team cap space only if player is not salary exempt
+        if (!player.salaryExempt) {
+          // Give cap space back to trading team
+          await db.update(teams)
+            .set({
+              availableCap: sql`${teams.availableCap} + ${playerSalary}`,
+            })
+            .where(eq(teams.id, fromTeam.id));
 
-        await db.update(teams)
-          .set({
-            availableCap: toTeam.availableCap! - playerSalary
-          })
-          .where(eq(teams.id, toTeam.id));
+          // Remove cap space from receiving team
+          await db.update(teams)
+            .set({
+              availableCap: sql`${teams.availableCap} - ${playerSalary}`,
+            })
+            .where(eq(teams.id, toTeam.id));
+        }
 
         // Update player's team and contract
         await db.update(players)
@@ -109,12 +103,8 @@ export const TradeCommands = [
         // Update Discord roles
         const member = await interaction.guild?.members.fetch(user.id);
         if (member) {
-          if ('id' in fromTeamRole) {
-            await member.roles.remove(fromTeamRole.id);
-          }
-          if ('id' in toTeamRole) {
-            await member.roles.add(toTeamRole.id);
-          }
+          await member.roles.remove(fromTeamRole);
+          await member.roles.add(toTeamRole);
         }
 
         const tradeEmbed = new EmbedBuilder()
@@ -123,8 +113,8 @@ export const TradeCommands = [
           .addFields(
             { name: 'Salary', value: `$${playerSalary.toLocaleString()}`, inline: true },
             { name: 'Status', value: player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap', inline: true },
-            { name: `${fromTeam.name} Cap Space`, value: `$${(fromTeam.availableCap! + playerSalary).toLocaleString()}`, inline: true },
-            { name: `${toTeam.name} Cap Space`, value: `$${(toTeam.availableCap! - playerSalary).toLocaleString()}`, inline: true }
+            { name: `${fromTeam.name} Cap Space`, value: `$${(fromTeam.availableCap! + (player.salaryExempt ? 0 : playerSalary)).toLocaleString()}`, inline: true },
+            { name: `${toTeam.name} Cap Space`, value: `$${(toTeam.availableCap! - (player.salaryExempt ? 0 : playerSalary)).toLocaleString()}`, inline: true }
           )
           .setTimestamp();
 

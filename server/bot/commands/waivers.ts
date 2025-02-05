@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, ChannelType, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { db } from '@db';
 import { players, waivers, waiverSettings, teams, contracts } from '@db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 export const WaiversCommands = [
   {
@@ -168,17 +168,21 @@ export const WaiversCommands = [
           where: eq(players.discordId, user.id),
           with: {
             currentTeam: true,
-            contracts: {
-              where: eq(contracts.status, 'active'),
-            },
           },
         });
 
-        if (!player || !player.currentTeam) {
+        if (!player || !player.currentTeamId) {
           return interaction.editReply('Player is not signed to any team');
         }
 
-        const activeContract = player.contracts[0];
+        // Get active contract
+        const activeContract = await db.query.contracts.findFirst({
+          where: and(
+            eq(contracts.playerId, player.id),
+            eq(contracts.status, 'active'),
+          ),
+        });
+
         if (!activeContract) {
           return interaction.editReply('Player does not have an active contract');
         }
@@ -188,17 +192,26 @@ export const WaiversCommands = [
         const endTime = new Date();
         endTime.setHours(endTime.getHours() + 48); // 48 hour default period
 
-        // Create waiver entry with contract information
+        // Create waiver entry
         await db.insert(waivers).values({
-          playerId: player.id,
-          fromTeamId: player.currentTeamId!,
-          startTime,
-          endTime,
-          contractId: activeContract.id,
-          salary: activeContract.salary, // Store the salary with the waiver entry
+          player_id: player.id,
+          from_team_id: player.currentTeamId,
+          start_time: startTime,
+          end_time: endTime,
+          contract_id: activeContract.id,
+          salary: activeContract.salary,
         });
 
-        // Remove team role but keep the salary with the team
+        // Update team's available cap if player is not salary exempt
+        if (!player.salaryExempt) {
+          await db.update(teams)
+            .set({
+              availableCap: sql`${teams.availableCap} - ${activeContract.salary}`,
+            })
+            .where(eq(teams.id, player.currentTeamId));
+        }
+
+        // Remove team role
         const member = await interaction.guild?.members.fetch(user.id);
         const teamRole = interaction.guild?.roles.cache.find(
           role => role.name === player.currentTeam?.name
@@ -208,7 +221,7 @@ export const WaiversCommands = [
           await member.roles.remove(teamRole);
         }
 
-        // Update player status but keep contract and salary with original team
+        // Update player status but keep contract active
         await db.update(players)
           .set({
             currentTeamId: null,
@@ -224,7 +237,7 @@ export const WaiversCommands = [
         // Create waiver notification embed
         const waiverEmbed = new EmbedBuilder()
           .setTitle('🚨 Player Added to Waivers')
-          .setDescription(`${user} has been placed on waivers by ${player.currentTeam.name}`)
+          .setDescription(`${user} has been placed on waivers by ${player.currentTeam?.name}`)
           .addFields(
             { name: 'Waiver Period', value: `Ends <t:${Math.floor(endTime.getTime() / 1000)}:R>` },
             { name: 'Salary', value: `$${activeContract.salary.toLocaleString()}` },
@@ -244,7 +257,7 @@ export const WaiversCommands = [
         }
 
         await interaction.editReply({
-          content: `${user} has been placed on waivers. They will clear in 48 hours if unclaimed.\nTheir salary of $${activeContract.salary.toLocaleString()} will remain with ${player.currentTeam.name} until claimed.`,
+          content: `${user} has been placed on waivers. They will clear in 48 hours if unclaimed.\nTheir salary of $${activeContract.salary.toLocaleString()} will remain with ${player.currentTeam?.name} until claimed.`,
           embeds: [waiverEmbed],
         });
 
