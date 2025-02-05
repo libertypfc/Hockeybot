@@ -58,31 +58,24 @@ export const TradeCommands = [
     data: new SlashCommandBuilder()
       .setName('proposetrade')
       .setDescription('Propose a trade between two teams')
-      .addRoleOption(option =>
-        option.setName('team_sending')
-          .setDescription('Team sending a player')
-          .setRequired(true))
-      .addUserOption(option =>
-        option.setName('player_sending')
-          .setDescription('Player being sent')
-          .setRequired(true))
-      .addRoleOption(option =>
-        option.setName('team_receiving')
-          .setDescription('Team receiving a player')
-          .setRequired(true))
-      .addUserOption(option =>
-        option.setName('player_receiving')
-          .setDescription('Player being received')
+      .addStringOption(option =>
+        option.setName('trade_details')
+          .setDescription('Format: team1 sending player1 to team2 receiving player2')
           .setRequired(true)),
 
     async execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
 
       try {
-        const teamSendingRole = interaction.options.getRole('team_sending', true);
-        const playerSending = interaction.options.getUser('player_sending', true);
-        const teamReceivingRole = interaction.options.getRole('team_receiving', true);
-        const playerReceiving = interaction.options.getUser('player_receiving', true);
+        const tradeDetails = interaction.options.getString('trade_details', true);
+        const regex = /^(.+?)\s+sending\s+(.+?)\s+to\s+(.+?)\s+receiving\s+(.+?)$/i;
+        const match = tradeDetails.match(regex);
+
+        if (!match) {
+          return interaction.editReply('Invalid trade format. Please use: "team1 sending player1 to team2 receiving player2"');
+        }
+
+        const [, teamSendingName, playerSendingName, teamReceivingName, playerReceivingName] = match;
 
         // Check if user is a GM
         const isGM = interaction.guild?.roles.cache.some(role =>
@@ -95,28 +88,44 @@ export const TradeCommands = [
 
         // Get both teams from database
         const teamSending = await db.query.teams.findFirst({
-          where: eq(teams.name, teamSendingRole.name),
+          where: eq(teams.name, teamSendingName.trim()),
         });
 
         const teamReceiving = await db.query.teams.findFirst({
-          where: eq(teams.name, teamReceivingRole.name),
+          where: eq(teams.name, teamReceivingName.trim()),
         });
 
         if (!teamSending || !teamReceiving) {
           return interaction.editReply('Invalid team name(s)');
         }
 
+        // Find the player being sent by searching members
+        const members = await interaction.guild?.members.fetch();
+        const playerSendingMember = members?.find(member => 
+          member.displayName.toLowerCase() === playerSendingName.trim().toLowerCase() ||
+          member.user.username.toLowerCase() === playerSendingName.trim().toLowerCase()
+        );
+
+        const playerReceivingMember = members?.find(member => 
+          member.displayName.toLowerCase() === playerReceivingName.trim().toLowerCase() ||
+          member.user.username.toLowerCase() === playerReceivingName.trim().toLowerCase()
+        );
+
+        if (!playerSendingMember || !playerReceivingMember) {
+          return interaction.editReply('One or both players not found');
+        }
+
         // Get players and their active contracts
         const playerSendingData = await db.query.players.findFirst({
           where: and(
-            eq(players.discordId, playerSending.id),
+            eq(players.discordId, playerSendingMember.id),
             eq(players.currentTeamId, teamSending.id)
           ),
         });
 
         const playerReceivingData = await db.query.players.findFirst({
           where: and(
-            eq(players.discordId, playerReceiving.id),
+            eq(players.discordId, playerReceivingMember.id),
             eq(players.currentTeamId, teamReceiving.id)
           ),
         });
@@ -176,13 +185,13 @@ export const TradeCommands = [
           .addFields(
             { 
               name: `${teamSending.name} Sends:`, 
-              value: `${playerSending}\nSalary: $${contractSending.salary.toLocaleString()}\nStatus: ${playerSendingData.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
+              value: `${playerSendingMember}\nSalary: $${contractSending.salary.toLocaleString()}\nStatus: ${playerSendingData.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
               inline: true 
             },
             { name: '\u200B', value: '\u200B', inline: true },
             { 
               name: `${teamReceiving.name} Sends:`, 
-              value: `${playerReceiving}\nSalary: $${contractReceiving.salary.toLocaleString()}\nStatus: ${playerReceivingData.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
+              value: `${playerReceivingMember}\nSalary: $${contractReceiving.salary.toLocaleString()}\nStatus: ${playerReceivingData.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
               inline: true 
             }
           )
