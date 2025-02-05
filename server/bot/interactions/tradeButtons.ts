@@ -1,4 +1,4 @@
-import { ButtonInteraction, EmbedBuilder, ButtonStyle, ActionRowBuilder, ButtonBuilder } from 'discord.js';
+import { ButtonInteraction, EmbedBuilder, ButtonStyle, ActionRowBuilder, ButtonBuilder, Role } from 'discord.js';
 import { db } from '@db';
 import { tradeProposals, tradeAdminSettings, players, teams, contracts } from '@db/schema';
 import { eq, and, sql } from 'drizzle-orm';
@@ -21,6 +21,7 @@ export async function handleTradeButtons(interaction: ButtonInteraction) {
         fromTeam: true,
         toTeam: true,
         player: true,
+        playerReceiving: true,
       },
     });
 
@@ -32,17 +33,24 @@ export async function handleTradeButtons(interaction: ButtonInteraction) {
       return;
     }
 
-    // Get active contract
-    const activeContract = await db.query.contracts.findFirst({
+    // Get active contracts for both players
+    const contractSending = await db.query.contracts.findFirst({
       where: and(
         eq(contracts.playerId, proposal.playerId),
         eq(contracts.status, 'active')
       ),
     });
 
-    if (!activeContract) {
+    const contractReceiving = await db.query.contracts.findFirst({
+      where: and(
+        eq(contracts.playerId, proposal.playerReceivingId),
+        eq(contracts.status, 'active')
+      ),
+    });
+
+    if (!contractSending || !contractReceiving) {
       await interaction.reply({
-        content: 'Player contract not found',
+        content: 'One or both player contracts not found',
         ephemeral: true
       });
       return;
@@ -94,11 +102,17 @@ export async function handleTradeButtons(interaction: ButtonInteraction) {
           .setTitle('🔄 Trade Pending Approval')
           .setDescription(`Trade between ${proposal.fromTeam.name} and ${proposal.toTeam.name}`)
           .addFields(
-            { name: 'Player', value: `<@${proposal.player.discordId}>`, inline: true },
-            { name: 'From', value: proposal.fromTeam.name, inline: true },
-            { name: 'To', value: proposal.toTeam.name, inline: true },
-            { name: 'Salary', value: `$${activeContract.salary.toLocaleString()}`, inline: true },
-            { name: 'Status', value: proposal.player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap', inline: true }
+            { 
+              name: `${proposal.fromTeam.name} Sends:`, 
+              value: `<@${proposal.player.discordId}>\nSalary: $${contractSending.salary.toLocaleString()}\nStatus: ${proposal.player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
+              inline: true 
+            },
+            { name: '\u200B', value: '\u200B', inline: true },
+            { 
+              name: `${proposal.toTeam.name} Sends:`, 
+              value: `<@${proposal.playerReceiving.discordId}>\nSalary: $${contractReceiving.salary.toLocaleString()}\nStatus: ${proposal.playerReceiving.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
+              inline: true 
+            }
           )
           .setTimestamp();
 
@@ -171,35 +185,58 @@ export async function handleTradeButtons(interaction: ButtonInteraction) {
           return;
         }
 
-        // Process the trade
+        // Process the trade - Update cap space for both teams
         if (!proposal.player.salaryExempt) {
-          // Update cap space
           await db.update(teams)
             .set({
-              availableCap: sql`${teams.availableCap} + ${activeContract.salary}`,
+              availableCap: sql`${teams.availableCap} + ${contractSending.salary}`,
             })
             .where(eq(teams.id, proposal.fromTeamId));
 
           await db.update(teams)
             .set({
-              availableCap: sql`${teams.availableCap} - ${activeContract.salary}`,
+              availableCap: sql`${teams.availableCap} - ${contractReceiving.salary}`,
             })
             .where(eq(teams.id, proposal.toTeamId));
         }
 
-        // Update player's team
+        if (!proposal.playerReceiving.salaryExempt) {
+          await db.update(teams)
+            .set({
+              availableCap: sql`${teams.availableCap} + ${contractReceiving.salary}`,
+            })
+            .where(eq(teams.id, proposal.toTeamId));
+
+          await db.update(teams)
+            .set({
+              availableCap: sql`${teams.availableCap} - ${contractSending.salary}`,
+            })
+            .where(eq(teams.id, proposal.fromTeamId));
+        }
+
+        // Update players' teams
         await db.update(players)
           .set({ currentTeamId: proposal.toTeamId })
           .where(eq(players.id, proposal.playerId));
 
-        // Update contract
+        await db.update(players)
+          .set({ currentTeamId: proposal.fromTeamId })
+          .where(eq(players.id, proposal.playerReceivingId));
+
+        // Update contracts
         await db.update(contracts)
           .set({ teamId: proposal.toTeamId })
-          .where(eq(contracts.id, activeContract.id));
+          .where(eq(contracts.id, contractSending.id));
 
-        // Update Discord roles
-        const member = await interaction.guild?.members.fetch(proposal.player.discordId);
-        if (member) {
+        await db.update(contracts)
+          .set({ teamId: proposal.fromTeamId })
+          .where(eq(contracts.id, contractReceiving.id));
+
+        // Update Discord roles for both players
+        const memberSending = await interaction.guild?.members.fetch(proposal.player.discordId);
+        const memberReceiving = await interaction.guild?.members.fetch(proposal.playerReceiving.discordId);
+
+        if (memberSending && memberReceiving) {
           const fromTeamRole = interaction.guild?.roles.cache.find(
             (role): role is Role => role.name === proposal.fromTeam.name
           );
@@ -207,8 +244,12 @@ export async function handleTradeButtons(interaction: ButtonInteraction) {
             (role): role is Role => role.name === proposal.toTeam.name
           );
 
-          if (fromTeamRole) await member.roles.remove(fromTeamRole);
-          if (toTeamRole) await member.roles.add(toTeamRole);
+          if (fromTeamRole && toTeamRole) {
+            await memberSending.roles.remove(fromTeamRole);
+            await memberSending.roles.add(toTeamRole);
+            await memberReceiving.roles.remove(toTeamRole);
+            await memberReceiving.roles.add(fromTeamRole);
+          }
         }
 
         // Update proposal status

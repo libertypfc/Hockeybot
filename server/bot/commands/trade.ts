@@ -57,22 +57,32 @@ export const TradeCommands = [
   {
     data: new SlashCommandBuilder()
       .setName('proposetrade')
-      .setDescription('Propose a trade to another team')
+      .setDescription('Propose a trade between two teams')
       .addRoleOption(option =>
-        option.setName('to_team')
-          .setDescription('Team to propose trade to')
+        option.setName('team_sending')
+          .setDescription('Team sending a player')
           .setRequired(true))
       .addUserOption(option =>
-        option.setName('player')
-          .setDescription('Player to trade')
+        option.setName('player_sending')
+          .setDescription('Player being sent')
+          .setRequired(true))
+      .addRoleOption(option =>
+        option.setName('team_receiving')
+          .setDescription('Team receiving a player')
+          .setRequired(true))
+      .addUserOption(option =>
+        option.setName('player_receiving')
+          .setDescription('Player being received')
           .setRequired(true)),
 
     async execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
 
       try {
-        const toTeamRole = interaction.options.getRole('to_team', true);
-        const user = interaction.options.getUser('player', true);
+        const teamSendingRole = interaction.options.getRole('team_sending', true);
+        const playerSending = interaction.options.getUser('player_sending', true);
+        const teamReceivingRole = interaction.options.getRole('team_receiving', true);
+        const playerReceiving = interaction.options.getUser('player_receiving', true);
 
         // Check if user is a GM
         const isGM = interaction.guild?.roles.cache.some(role =>
@@ -83,60 +93,64 @@ export const TradeCommands = [
           return interaction.editReply('You must be a GM to propose trades');
         }
 
-        // Get the user's team role
-        const fromTeamRole = interaction.guild?.roles.cache.find(role =>
-          interaction.member?.roles.cache.has(role.id) &&
-          !role.name.includes('GM') &&
-          !role.name.includes('General Manager')
-        );
-
-        if (!fromTeamRole) {
-          return interaction.editReply('Could not determine your team role');
-        }
-
-        // Get both teams
-        const fromTeam = await db.query.teams.findFirst({
-          where: eq(teams.name, fromTeamRole.name),
+        // Get both teams from database
+        const teamSending = await db.query.teams.findFirst({
+          where: eq(teams.name, teamSendingRole.name),
         });
 
-        const toTeam = await db.query.teams.findFirst({
-          where: eq(teams.name, toTeamRole.name),
+        const teamReceiving = await db.query.teams.findFirst({
+          where: eq(teams.name, teamReceivingRole.name),
         });
 
-        if (!fromTeam || !toTeam) {
+        if (!teamSending || !teamReceiving) {
           return interaction.editReply('Invalid team name(s)');
         }
 
-        // Get player and their active contract
-        const player = await db.query.players.findFirst({
+        // Get players and their active contracts
+        const playerSendingData = await db.query.players.findFirst({
           where: and(
-            eq(players.discordId, user.id),
-            eq(players.currentTeamId, fromTeam.id)
+            eq(players.discordId, playerSending.id),
+            eq(players.currentTeamId, teamSending.id)
           ),
         });
 
-        if (!player) {
-          return interaction.editReply('Player not found or not on your team');
+        const playerReceivingData = await db.query.players.findFirst({
+          where: and(
+            eq(players.discordId, playerReceiving.id),
+            eq(players.currentTeamId, teamReceiving.id)
+          ),
+        });
+
+        if (!playerSendingData || !playerReceivingData) {
+          return interaction.editReply('One or both players not found or not on the specified teams');
         }
 
-        // Get active contract
-        const activeContract = await db.query.contracts.findFirst({
+        // Get active contracts
+        const contractSending = await db.query.contracts.findFirst({
           where: and(
-            eq(contracts.playerId, player.id),
+            eq(contracts.playerId, playerSendingData.id),
             eq(contracts.status, 'active')
           ),
         });
 
-        if (!activeContract) {
-          return interaction.editReply('Player does not have an active contract');
+        const contractReceiving = await db.query.contracts.findFirst({
+          where: and(
+            eq(contracts.playerId, playerReceivingData.id),
+            eq(contracts.status, 'active')
+          ),
+        });
+
+        if (!contractSending || !contractReceiving) {
+          return interaction.editReply('One or both players do not have active contracts');
         }
 
         // Create trade proposal
         const [proposal] = await db.insert(tradeProposals)
           .values({
-            fromTeamId: fromTeam.id,
-            toTeamId: toTeam.id,
-            playerId: player.id,
+            fromTeamId: teamSending.id,
+            toTeamId: teamReceiving.id,
+            playerId: playerSendingData.id,
+            playerReceivingId: playerReceivingData.id,
             status: 'pending',
           })
           .returning();
@@ -158,13 +172,19 @@ export const TradeCommands = [
         // Create embed for trade proposal
         const proposalEmbed = new EmbedBuilder()
           .setTitle('🔄 Trade Proposal')
-          .setDescription(`${fromTeam.name} wants to trade ${user} to ${toTeam.name}`)
+          .setDescription(`${teamSending.name} and ${teamReceiving.name} Trade Proposal`)
           .addFields(
-            { name: 'Player', value: user.tag, inline: true },
-            { name: 'From Team', value: fromTeam.name, inline: true },
-            { name: 'To Team', value: toTeam.name, inline: true },
-            { name: 'Salary', value: `$${activeContract.salary.toLocaleString()}`, inline: true },
-            { name: 'Status', value: player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap', inline: true }
+            { 
+              name: `${teamSending.name} Sends:`, 
+              value: `${playerSending}\nSalary: $${contractSending.salary.toLocaleString()}\nStatus: ${playerSendingData.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
+              inline: true 
+            },
+            { name: '\u200B', value: '\u200B', inline: true },
+            { 
+              name: `${teamReceiving.name} Sends:`, 
+              value: `${playerReceiving}\nSalary: $${contractReceiving.salary.toLocaleString()}\nStatus: ${playerReceivingData.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap'}`,
+              inline: true 
+            }
           )
           .setTimestamp();
 
