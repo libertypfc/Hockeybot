@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, Role } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, Role, ChannelType, PermissionFlagsBits } from 'discord.js';
 import { db } from '@db';
 import { players, teams, contracts, tradeProposals, tradeAdminSettings } from '@db/schema';
 import { eq, and, sql } from 'drizzle-orm';
@@ -11,7 +11,9 @@ export const TradeCommands = [
       .addChannelOption(option =>
         option.setName('channel')
           .setDescription('Admin channel for trade approvals')
-          .setRequired(true)),
+          .addChannelTypes(ChannelType.GuildText)
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
@@ -22,6 +24,10 @@ export const TradeCommands = [
 
         if (!guild) {
           return interaction.editReply('This command must be used in a server.');
+        }
+
+        if (!channel.isTextBased()) {
+          return interaction.editReply('The channel must be a text channel.');
         }
 
         // Save or update settings
@@ -37,10 +43,14 @@ export const TradeCommands = [
             },
           });
 
-        await interaction.editReply(`Trade admin channel has been set to ${channel}`);
+        await interaction.editReply({
+          content: `✅ Trade admin channel has been set to ${channel}\nGMs can now use \`/proposetrade\` to initiate trades.`,
+          allowedMentions: { users: [], roles: [] }
+        });
       } catch (error) {
-        console.error('Error setting up trade admin channel:', error);
-        await interaction.editReply('Failed to set up trade admin channel');
+        console.error('[Error] Failed to set up trade admin channel:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to set up trade admin channel: ${errorMessage}`);
       }
     },
   },
@@ -65,7 +75,7 @@ export const TradeCommands = [
         const user = interaction.options.getUser('player', true);
 
         // Check if user is a GM
-        const isGM = interaction.guild?.roles.cache.some(role => 
+        const isGM = interaction.guild?.roles.cache.some(role =>
           role.name.includes('GM') || role.name.includes('General Manager')
         );
 
@@ -74,9 +84,9 @@ export const TradeCommands = [
         }
 
         // Get the user's team role
-        const fromTeamRole = interaction.guild?.roles.cache.find(role => 
-          interaction.member?.roles.cache.has(role.id) && 
-          !role.name.includes('GM') && 
+        const fromTeamRole = interaction.guild?.roles.cache.find(role =>
+          interaction.member?.roles.cache.has(role.id) &&
+          !role.name.includes('GM') &&
           !role.name.includes('General Manager')
         );
 
