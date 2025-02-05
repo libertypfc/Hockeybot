@@ -160,18 +160,20 @@ class ReliableDiscordClient extends Client {
   private startConnectionCheck() {
     if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval);
 
+    // Check connection state every 30 seconds instead of 3
     this.connectionCheckInterval = setInterval(() => {
       if (!this.isReady() && this.connectionState !== ConnectionState.RECONNECTING) {
         this.log('Connection', 'Bot is not ready, initiating reconnection...');
         this.attemptReconnect(true);
       }
-    }, 3000); // Check every 3 seconds
+    }, 30000);
   }
 
   private startHeartbeat() {
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     if (this.watchdogInterval) clearInterval(this.watchdogInterval);
 
+    // Use a longer interval for heartbeat checks (30 seconds)
     this.heartbeatInterval = setInterval(() => {
       if (this.isReady()) {
         this.lastHeartbeat = Date.now();
@@ -182,16 +184,17 @@ class ReliableDiscordClient extends Client {
           this.attemptReconnect(true);
         }
       }
-    }, 3000); // Heartbeat every 3 seconds
+    }, 30000); // Heartbeat every 30 seconds
 
+    // Watchdog checks every minute instead of 3 seconds
     this.watchdogInterval = setInterval(() => {
       const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-      if (timeSinceLastHeartbeat > 7000 &&
+      if (timeSinceLastHeartbeat > 90000 && // 90 seconds threshold
         this.connectionState !== ConnectionState.RECONNECTING) {
         this.log('Watchdog', 'Detected stale connection, forcing reconnect...');
         this.attemptReconnect(true);
       }
-    }, 3000); // Check every 3 seconds
+    }, 60000); // Check every minute
   }
 
   private async handleUncaughtError(error: Error) {
@@ -234,10 +237,17 @@ class ReliableDiscordClient extends Client {
       this.reconnectAttempts = 0;
     } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.log('Recovery', 'Maximum reconnection attempts reached. Resetting process...');
-      process.exit(1); // Force process restart through Replit
+      process.exit(1);
     }
 
-    const delay = force ? 0 : this.baseDelay * Math.pow(1.5, this.reconnectAttempts);
+    // Add exponential backoff with jitter
+    const baseDelay = force ? 0 : this.baseDelay;
+    const jitter = Math.random() * 1000;
+    const delay = force ? 0 : Math.min(
+      baseDelay * Math.pow(1.5, this.reconnectAttempts) + jitter,
+      300000 // Max 5 minutes
+    );
+
     this.log('Recovery', `Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
 
     await new Promise(resolve => setTimeout(resolve, delay));
@@ -247,6 +257,9 @@ class ReliableDiscordClient extends Client {
         await this.destroy();
       }
 
+      // Wait a bit before trying to reconnect
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       await this.login(process.env.DISCORD_TOKEN);
       this.lastHeartbeat = Date.now();
       this.setConnectionState(ConnectionState.CONNECTED);
@@ -255,20 +268,23 @@ class ReliableDiscordClient extends Client {
         this.reconnectAttempts = 0;
       }
 
-      // Schedule a forced reconnect after 2 hours
+      // Schedule a forced reconnect after 6 hours instead of 2
       if (this.forcedReconnectTimeout) {
         clearTimeout(this.forcedReconnectTimeout);
       }
       this.forcedReconnectTimeout = setTimeout(() => {
         this.log('Maintenance', 'Performing scheduled connection refresh...');
         this.attemptReconnect(true);
-      }, 2 * 60 * 60 * 1000);
+      }, 6 * 60 * 60 * 1000);
 
     } catch (error) {
       this.lastError = error as Error;
       this.log('Recovery', 'Reconnection attempt failed', error as Error);
       this.reconnectAttempts++;
       this.setConnectionState(ConnectionState.ERROR);
+
+      // Add delay before next reconnection attempt
+      await new Promise(resolve => setTimeout(resolve, 5000));
       await this.attemptReconnect();
     }
   }
@@ -296,10 +312,10 @@ class ReliableDiscordClient extends Client {
       this.startAllMonitors();
       this.log('Startup', 'Bot successfully started and connected!');
 
-      // Schedule first forced reconnect after 2 hours
+      // Schedule first forced reconnect after 6 hours instead of 2
       this.forcedReconnectTimeout = setTimeout(() => {
         this.attemptReconnect(true);
-      }, 2 * 60 * 60 * 1000);
+      }, 6 * 60 * 60 * 1000);
 
     } catch (error) {
       this.log('Startup', 'Failed to start the bot', error as Error);
