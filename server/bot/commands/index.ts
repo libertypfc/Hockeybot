@@ -1,4 +1,4 @@
-import { Client, Collection, REST, Routes } from 'discord.js';
+import { Client, Collection, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import { TeamCommands } from './team';
 import { ContractCommands } from './contract';
 import { WaiversCommands } from './waivers';
@@ -29,6 +29,10 @@ export async function registerCommands(client: Client) {
 
   // Register commands to the collection
   for (const command of commands) {
+    if (!command.data || !(command.data instanceof SlashCommandBuilder)) {
+      console.warn(`Skipping invalid command: ${command.data?.name || 'unknown'}`);
+      continue;
+    }
     console.log(`Adding command to collection: ${command.data.name}`);
     client.commands.set(command.data.name, command);
   }
@@ -51,7 +55,9 @@ export async function registerCommands(client: Client) {
     const guildId = guilds[0].id;
     console.log(`Registering commands for guild: ${guildId}`);
 
-    const commandData = commands.map(command => command.data.toJSON());
+    const commandData = commands
+      .filter(cmd => cmd.data instanceof SlashCommandBuilder)
+      .map(command => command.data.toJSON());
     console.log(`Prepared ${commandData.length} commands for registration`);
 
     await rest.put(

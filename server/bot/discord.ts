@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, Collection } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, ChatInputCommandInteraction } from 'discord.js';
 import { log } from '../vite';
 import { TeamCommands } from './commands/team';
 import { ContractCommands } from './commands/contract';
@@ -16,11 +16,13 @@ const client = new Client({
 });
 
 // Store commands in a collection
-const commands = new Collection();
+const commands: Collection<string, any> = new Collection();
 
 // Register all commands
 [...TeamCommands, ...ContractCommands, ...TradeCommands, ...WaiversCommands].forEach(command => {
-  commands.set(command.data.name, command);
+  if (command.data) {
+    commands.set(command.data.name, command);
+  }
 });
 
 export async function startBot() {
@@ -32,11 +34,13 @@ export async function startBot() {
 
       // Register commands with Discord
       try {
-        const commandsData = [...commands.values()].map(cmd => cmd.data);
+        const commandsArray = Array.from(commands.values());
+        const commandsData = commandsArray.map(cmd => cmd.data);
         await client.application?.commands.set(commandsData);
         log('Successfully registered application commands.', 'discord');
       } catch (error) {
-        log('Error registering commands:', error);
+        log('Error registering commands:', 'discord');
+        console.error(error);
       }
     });
 
@@ -61,9 +65,15 @@ export async function startBot() {
       }
 
       try {
-        await command.execute(interaction);
+        if (typeof command.execute === 'function') {
+          await command.execute(interaction);
+        } else {
+          log(`Command ${interaction.commandName} has no execute function`, 'discord');
+        }
       } catch (error) {
-        log(`Error executing ${interaction.commandName}`, error);
+        log(`Error executing ${interaction.commandName}`, 'discord');
+        console.error(error);
+
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
 
         const replyContent = {
@@ -96,7 +106,8 @@ export async function startBot() {
 
     return client;
   } catch (error) {
-    log(`Failed to start Discord bot: ${error}`, 'discord');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    log(`Failed to start Discord bot: ${errorMessage}`, 'discord');
     throw error;
   }
 }
