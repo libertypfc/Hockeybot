@@ -7,7 +7,6 @@ import { eq, and, gte, lte, sql } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
   const port = process.env.PORT || 3000;
-  const alternatePort = 3001;
 
   // API Routes
   app.get('/api/teams', async (req, res) => {
@@ -76,40 +75,19 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  const tryPort = (portToTry: number): Promise<Server> => {
-    return new Promise((resolve, reject) => {
-      const httpServer = createServer(app);
+  // Create HTTP server with consistent port
+  const httpServer = createServer(app);
 
-      httpServer.on('error', (err: any) => {
-        if (err.code === 'EADDRINUSE') {
-          console.log(`Port ${portToTry} is in use, trying ${alternatePort}`);
-          if (portToTry !== alternatePort) {
-            httpServer.close();
-            resolve(tryPort(alternatePort));
-          } else {
-            reject(new Error('Both ports are in use'));
-          }
-        } else {
-          reject(err);
-        }
-      });
+  httpServer.listen(port, '0.0.0.0', async () => {
+    console.log(`Server is running on port ${port}`);
+    try {
+      await startBot();
+      console.log('Bot started successfully after server initialization');
+    } catch (error) {
+      console.error('Failed to start bot:', error);
+      console.error('Bot startup failed but server will continue running');
+    }
+  });
 
-      httpServer.listen(portToTry, '0.0.0.0', async () => {
-        console.log(`Server is running on port ${portToTry}`);
-        try {
-          // Start the bot after server is ready and handle any startup errors
-          await startBot();
-          console.log('Bot started successfully after server initialization');
-        } catch (error) {
-          console.error('Failed to start bot:', error);
-          // Don't exit process, just log the error
-          console.error('Bot startup failed but server will continue running');
-        }
-        resolve(httpServer);
-      });
-    });
-  };
-
-  // Try to start the server on the primary port
-  return tryPort(Number(port)) as Promise<Server> & Server;
+  return httpServer;
 }

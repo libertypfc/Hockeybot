@@ -71,7 +71,7 @@ app.use((req, res, next) => {
     }
 
     // Start the HTTP server
-    const PORT = 5000;
+    const PORT = Number(process.env.PORT) || 5000;
     httpServer.listen(PORT, "0.0.0.0", () => {
       log(`HTTP server listening on port ${PORT}`, 'startup');
     });
