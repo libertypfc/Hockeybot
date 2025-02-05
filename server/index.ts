@@ -38,10 +38,19 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
+let isStarting = false;
+let startupError: Error | null = null;
+
+async function startApplication() {
+  if (isStarting) return;
+  isStarting = true;
+
   try {
     // Start Discord bot first
-    await startBot();
+    const discordClient = await startBot();
+    if (!discordClient) {
+      throw new Error('Failed to initialize Discord bot');
+    }
     log('Discord bot started successfully', 'startup');
 
     // Create HTTP server
@@ -75,8 +84,20 @@ app.use((req, res, next) => {
     httpServer.listen(PORT, "0.0.0.0", () => {
       log(`HTTP server listening on port ${PORT}`, 'startup');
     });
+
+    return true;
   } catch (error) {
+    startupError = error as Error;
+    log(`Critical startup error: ${error}`, 'startup');
     console.error('Startup error:', error);
-    process.exit(1);
+    throw error;
+  } finally {
+    isStarting = false;
   }
-})();
+}
+
+// Start the application
+startApplication().catch(error => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});
