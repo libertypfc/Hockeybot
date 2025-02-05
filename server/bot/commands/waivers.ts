@@ -194,11 +194,11 @@ export const WaiversCommands = [
 
         // Create waiver entry
         await db.insert(waivers).values({
-          player_id: player.id,
-          from_team_id: player.currentTeamId,
-          start_time: startTime,
-          end_time: endTime,
-          contract_id: activeContract.id,
+          playerId: player.id,
+          fromTeamId: player.currentTeamId,
+          startTime: startTime,
+          endTime: endTime,
+          contractId: activeContract.id,
           salary: activeContract.salary,
         });
 
