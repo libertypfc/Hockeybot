@@ -50,6 +50,11 @@ export const TeamCommands = [
 
       try {
         const teamName = interaction.options.getString('name', true);
+        const guildId = interaction.guildId; // Get the current guild ID
+
+        if (!guildId) {
+          return interaction.editReply('This command can only be used in a server.');
+        }
 
         // Create category
         const category = await interaction.guild?.channels.create({
@@ -83,7 +88,7 @@ export const TeamCommands = [
           name: 'stats-pictures',
           type: ChannelType.GuildMedia,
           parent: category.id,
-          rateLimitPerUser: 30, // 30 seconds slowmode to prevent spam
+          rateLimitPerUser: 30,
           nsfw: false,
           permissionOverwrites: [
             {
@@ -108,11 +113,12 @@ export const TeamCommands = [
           mentionable: true,
         });
 
-        // Save team to database
+        // Save team to database with guildId
         await db.insert(teams).values({
           name: teamName,
           discordCategoryId: category.id,
-          salaryCap: 82_500_000, // NHL salary cap as default
+          guildId: guildId, // Include guildId when creating team
+          salaryCap: 82_500_000,
           availableCap: 82_500_000,
         });
 
@@ -132,11 +138,13 @@ export const TeamCommands = [
 
     async execute(interaction: ChatInputCommandInteraction) {
       try {
-        // Get all teams from database
-        const allTeams = await db.query.teams.findMany();
+        // Get all teams from database for the current guild
+        const allTeams = await db.query.teams.findMany({
+          where: eq(teams.guildId, interaction.guildId)
+        });
 
         if (allTeams.length === 0) {
-          return interaction.reply('No teams found in the database.');
+          return interaction.reply('No teams found in the database for this guild.');
         }
 
         // Create select menu for teams
@@ -144,7 +152,7 @@ export const TeamCommands = [
           .setCustomId('team-select')
           .setPlaceholder('Select a team to delete')
           .addOptions(
-            allTeams.map(team => 
+            allTeams.map(team =>
               new StringSelectMenuOptionBuilder()
                 .setLabel(team.name)
                 .setValue(team.id.toString())
@@ -178,7 +186,7 @@ export const TeamCommands = [
           }
 
           let errors: string[] = [];
-        
+
           const teamPlayers = await db.select({
             id: players.id,
           })
@@ -196,7 +204,7 @@ export const TeamCommands = [
           for (const player of teamPlayers) {
             await assignFreeAgentRole(interaction, player.id);
           }
-          
+
           // 2. Delete all contracts associated with this team
           try {
             await db.delete(contracts)
@@ -249,7 +257,7 @@ export const TeamCommands = [
           }
 
           const successMessage = `Team ${selectedTeam.name} has been deleted.`;
-          const errorMessage = errors.length > 0 
+          const errorMessage = errors.length > 0
             ? `\nWarning: Some operations failed: ${errors.join(', ')}`
             : '';
 
@@ -295,18 +303,26 @@ export const TeamCommands = [
 
       try {
         const teamName = interaction.options.getString('name', true);
+        const guildId = interaction.guildId; //get guildId
 
-        // Get team from database
+        if (!guildId) {
+          return interaction.editReply('This command must be run in a guild.');
+        }
+
+        // Get team from database, filtering by guildId
         const team = await db.select({
           id: teams.id,
           name: teams.name,
         })
         .from(teams)
-        .where(eq(teams.name, teamName))
+        .where(and(
+          eq(teams.name, teamName),
+          eq(teams.guildId, guildId)
+        ))
         .then(rows => rows[0]);
 
         if (!team) {
-          return interaction.editReply(`Team "${teamName}" not found in database`);
+          return interaction.editReply(`Team "${teamName}" not found in database for this guild`);
         }
 
         // Get all players before updating
@@ -324,7 +340,7 @@ export const TeamCommands = [
             status: 'free_agent'
           })
           .where(eq(players.currentTeamId, team.id));
-        
+
         // Assign Free Agent role to all affected players
         for (const player of teamPlayers) {
           await assignFreeAgentRole(interaction, player.id);
@@ -361,8 +377,13 @@ export const TeamCommands = [
 
       try {
         const teamRole = interaction.options.getRole('team', true);
+        const guildId = interaction.guildId; //get guildId
 
-        // Get team information with explicit field selection
+        if (!guildId) {
+          return interaction.editReply('This command must be run in a guild.');
+        }
+
+        // Get team information with explicit field selection, filtering by guildId
         const team = await db.select({
           id: teams.id,
           name: teams.name,
@@ -370,11 +391,14 @@ export const TeamCommands = [
           availableCap: teams.availableCap,
         })
         .from(teams)
-        .where(eq(teams.name, teamRole.name))
+        .where(and(
+          eq(teams.name, teamRole.name),
+          eq(teams.guildId, guildId)
+        ))
         .then(rows => rows[0]);
 
         if (!team) {
-          return interaction.editReply('Team not found in database');
+          return interaction.editReply('Team not found in database for this guild');
         }
 
         // Get all players on the team with their active contracts
@@ -412,9 +436,9 @@ export const TeamCommands = [
           .setTitle(`${team.name} Team Information`)
           .setColor('#0099ff')
           .addFields(
-            { 
-              name: 'Salary Cap Information', 
-              value: 
+            {
+              name: 'Salary Cap Information',
+              value:
                 `Total Cap: $${(team.salaryCap ?? 0).toLocaleString()}\n` +
                 `Used Cap: $${totalSalary.toLocaleString()}\n` +
                 `Available Cap: $${availableCap.toLocaleString()}`
@@ -436,22 +460,22 @@ export const TeamCommands = [
 
           // Add non-exempt players
           if (nonExemptPlayers.length > 0) {
-            embed.addFields({ 
-              name: 'Active Roster', 
+            embed.addFields({
+              name: 'Active Roster',
               value: nonExemptPlayers.map(formatPlayer).join('\n') || 'No active players'
             });
           }
 
           // Add exempt players with special indicator
           if (exemptPlayers.length > 0) {
-            embed.addFields({ 
-              name: '🌟 Salary Cap Exempt Players', 
+            embed.addFields({
+              name: '🌟 Salary Cap Exempt Players',
               value: exemptPlayers.map(formatPlayer).join('\n')
             });
           }
         } else {
-          embed.addFields({ 
-            name: 'Current Roster', 
+          embed.addFields({
+            name: 'Current Roster',
             value: 'No players on roster'
           });
         }
@@ -472,17 +496,24 @@ export const TeamCommands = [
 
     async execute(interaction: ChatInputCommandInteraction) {
       try {
-        // Get all teams from database
+        const guildId = interaction.guildId; //get guildId
+
+        if (!guildId) {
+          return interaction.reply('This command must be run in a guild.');
+        }
+
+        // Get all teams from database for the current guild
         const allTeams = await db.query.teams.findMany({
           with: {
             players: {
               where: eq(players.status, 'signed'),
             },
           },
+          where: eq(teams.guildId, guildId)
         });
 
         if (allTeams.length === 0) {
-          return interaction.reply('No teams found in the database.');
+          return interaction.reply('No teams found in the database for this guild.');
         }
 
         // Create select menu for teams
@@ -490,7 +521,7 @@ export const TeamCommands = [
           .setCustomId('team-select')
           .setPlaceholder('Select a team')
           .addOptions(
-            allTeams.map(team => 
+            allTeams.map(team =>
               new StringSelectMenuOptionBuilder()
                 .setLabel(team.name)
                 .setValue(team.id.toString())
@@ -543,7 +574,7 @@ export const TeamCommands = [
             .setCustomId('player-select')
             .setPlaceholder('Select a player')
             .addOptions(
-              teamPlayers.map(player => 
+              teamPlayers.map(player =>
                 new StringSelectMenuOptionBuilder()
                   .setLabel(player.username)
                   .setValue(player.id.toString())
@@ -592,8 +623,8 @@ export const TeamCommands = [
 
           // Toggle exempt status
           await db.update(players)
-            .set({ 
-              salaryExempt: !selectedPlayer.salaryExempt 
+            .set({
+              salaryExempt: !selectedPlayer.salaryExempt
             })
             .where(eq(players.id, selectedPlayerId));
 
@@ -609,7 +640,7 @@ export const TeamCommands = [
             // Update team's available cap space based on exemption status
             const capAdjustment = selectedPlayer.salaryExempt ? -activeContract.salary : activeContract.salary;
             await db.update(teams)
-              .set({ 
+              .set({
                 availableCap: sql`${teams.availableCap} + ${capAdjustment}`
               })
               .where(eq(teams.id, selectedTeamId));
@@ -651,17 +682,24 @@ export const TeamCommands = [
 
     async execute(interaction: ChatInputCommandInteraction) {
       try {
-        // Get all teams from database
+        const guildId = interaction.guildId; //get guildId
+
+        if (!guildId) {
+          return interaction.reply('This command must be run in a guild.');
+        }
+
+        // Get all teams from database for the current guild
         const allTeams = await db.query.teams.findMany({
           with: {
             players: {
               where: eq(players.status, 'signed'),
             },
           },
+          where: eq(teams.guildId, guildId)
         });
 
         if (allTeams.length === 0) {
-          return interaction.reply('No teams found in the database.');
+          return interaction.reply('No teams found in the database for this guild.');
         }
 
         // Create select menu for teams
@@ -669,7 +707,7 @@ export const TeamCommands = [
           .setCustomId('team-select')
           .setPlaceholder('Select a team')
           .addOptions(
-            allTeams.map(team => 
+            allTeams.map(team =>
               new StringSelectMenuOptionBuilder()
                 .setLabel(team.name)
                 .setValue(team.id.toString())
@@ -722,7 +760,7 @@ export const TeamCommands = [
             .setCustomId('player-select')
             .setPlaceholder('Select a player')
             .addOptions(
-              teamPlayers.map(player => 
+              teamPlayers.map(player =>
                 new StringSelectMenuOptionBuilder()
                   .setLabel(player.username)
                   .setValue(player.id.toString())
@@ -756,13 +794,13 @@ export const TeamCommands = [
 
           // After setting player as free agent
           await db.update(players)
-            .set({ 
+            .set({
               currentTeamId: null,
               status: 'free_agent',
-              salaryExempt: false 
+              salaryExempt: false
             })
             .where(eq(players.id, selectedPlayerId));
-            
+
           await assignFreeAgentRole(interaction, selectedPlayerId);
 
           // Terminate any active contracts
@@ -847,6 +885,11 @@ export const TeamCommands = [
       try {
         const teamRole = interaction.options.getRole('team', true);
         const newCap = interaction.options.getInteger('amount', true);
+        const guildId = interaction.guildId; //get guildId
+
+        if (!guildId) {
+          return interaction.editReply('This command must be run in a guild.');
+        }
 
         if (newCap < 0) {
           return interaction.editReply('Salary cap cannot be negative.');
@@ -858,11 +901,14 @@ export const TeamCommands = [
           salaryCap: teams.salaryCap,
         })
         .from(teams)
-        .where(eq(teams.name, teamRole.name))
+        .where(and(
+          eq(teams.name, teamRole.name),
+          eq(teams.guildId, guildId)
+        ))
         .then(rows => rows[0]);
 
         if (!team) {
-          return interaction.editReply('Team not found in database');
+          return interaction.editReply('Team not found in database for this guild');
         }
 
         await db.update(teams)
@@ -908,6 +954,11 @@ export const TeamCommands = [
       try {
         const teamRole = interaction.options.getRole('team', true);
         const newFloor = interaction.options.getInteger('amount', true);
+        const guildId = interaction.guildId; //get guildId
+
+        if (!guildId) {
+          return interaction.editReply('This command must be run in a guild.');
+        }
 
         if (newFloor < 0) {
           return interaction.editReply('Salary cap floor cannot be negative.');
@@ -919,11 +970,14 @@ export const TeamCommands = [
           capFloor: teams.capFloor,
         })
         .from(teams)
-        .where(eq(teams.name, teamRole.name))
+        .where(and(
+          eq(teams.name, teamRole.name),
+          eq(teams.guildId, guildId)
+        ))
         .then(rows => rows[0]);
 
         if (!team) {
-          return interaction.editReply('Team not found in database');
+          return interaction.editReply('Team not found in database for this guild');
         }
 
         await db.update(teams)

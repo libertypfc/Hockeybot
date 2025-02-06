@@ -11,7 +11,14 @@ export function registerRoutes(app: Express): Server {
   // API Routes
   app.get('/api/teams', async (req, res) => {
     try {
+      const { guildId } = req.query; // Get guildId from query params
+
+      if (!guildId) {
+        return res.status(400).json({ error: 'Guild ID is required' });
+      }
+
       const allTeams = await db.query.teams.findMany({
+        where: eq(teams.guildId, guildId as string),
         with: {
           players: true,
           contracts: {

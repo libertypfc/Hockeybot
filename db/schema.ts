@@ -18,12 +18,13 @@ export const divisions = pgTable("divisions", {
   metadata: text("metadata"),
 });
 
-// Update teams table to include division reference
+// Update teams table to include guildId for server isolation
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
-  name: text("name").unique().notNull(),
+  name: text("name").notNull(),
   discordCategoryId: text("discord_category_id").notNull(),
   divisionId: integer("division_id").references(() => divisions.id),
+  guildId: text("guild_id").notNull(), // Add this field for server isolation
   salaryCap: integer("salary_cap").default(82500000),
   capFloor: integer("cap_floor").default(3000000),
   availableCap: integer("available_cap").default(82500000),
