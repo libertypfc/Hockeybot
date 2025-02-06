@@ -1,23 +1,23 @@
-import { startBot } from './discord';
+import { startBot, client } from './index';
 import { log } from '../vite';
 
 async function testBot() {
   try {
     log('Starting Discord bot test...', 'test');
-    const client = await startBot();
-
-    if (!client) {
-      throw new Error('Failed to initialize Discord client');
-    }
+    await startBot();
 
     // Basic bot functionality test
-    log(`Bot is logged in as ${client.user?.tag}`, 'test');
+    log(`Bot status: ${client.isReady() ? 'Ready' : 'Not Ready'}`, 'test');
+    log(`Connection state: ${client['connectionState']}`, 'test');
     log(`Bot is in ${client.guilds.cache.size} guilds`, 'test');
 
     // List all available commands
     const commands = await client.application?.commands.fetch();
     if (commands) {
-      log(`Available commands (${commands.size}): ${[...commands.values()].map(cmd => cmd.name).join(', ')}`, 'test');
+      log(`Available commands (${commands.size}):`, 'test');
+      commands.forEach(command => {
+        log(`- ${command.name}`, 'test');
+      });
     } else {
       log('No commands found or commands not yet registered', 'test');
     }
@@ -35,8 +35,14 @@ async function testBot() {
   }
 }
 
-testBot().then(success => {
-  if (!success) {
-    process.exit(1);
-  }
-});
+// Export the test function for use in other modules
+export { testBot };
+
+// Run the test if this file is executed directly
+if (require.main === module) {
+  testBot().then(success => {
+    if (!success) {
+      process.exit(1);
+    }
+  });
+}

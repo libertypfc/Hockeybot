@@ -76,26 +76,20 @@ class ReliableDiscordClient extends Client {
     });
 
     // Handle WebSocket events directly
+    this.ws?.on('error', (error: Error) => {
+      console.error('[WebSocket] Error:', error);
+      client.destroy().then(() => {
+        console.log('[WebSocket] Client destroyed, preparing reconnect');
+        client.login(process.env.DISCORD_TOKEN);
+      }).catch(err => {
+        console.error('[WebSocket] Error during client cleanup:', err);
+      });
+    });
+
     this.ws?.on('close', (code: number) => {
       console.log(`[WebSocket] Gateway connection closed with code ${code}`);
 
-      // Handle specific close codes
-      switch (code) {
-        case 1000: // Normal closure
-          console.log('[WebSocket] Normal closure, attempting reconnect');
-          break;
-        case 1001: // Going away
-          console.log('[WebSocket] Gateway server going away, will attempt reconnect');
-          break;
-        case 1006: // Abnormal closure
-          console.error('[WebSocket] Abnormal closure detected');
-          break;
-        default:
-          console.log(`[WebSocket] Unexpected close code: ${code}`);
-      }
-
-      // Let the client's built-in reconnection handle it
-      if (code !== 1000) {
+      if (code !== 1000) { // Not a normal closure
         client.destroy().then(() => {
           console.log('[WebSocket] Client destroyed, preparing reconnect');
           client.login(process.env.DISCORD_TOKEN);
@@ -324,7 +318,7 @@ class ReliableDiscordClient extends Client {
   }
 }
 
-const client = new ReliableDiscordClient();
+export const client = new ReliableDiscordClient();
 
 async function checkExpiredContracts() {
   try {
@@ -351,22 +345,20 @@ async function checkExpiredContracts() {
 
           if (metadata.offerMessageId) {
             try {
-              const channels = await client.guilds.cache.first()?.channels.fetch();
-              if (channels) {
-                for (const [, channel] of channels) {
-                  if (channel?.type === ChannelType.GuildText) {
-                    try {
-                      const message = await channel.messages.fetch(metadata.offerMessageId);
-                      if (message) {
-                        const expiredEmbed = EmbedBuilder.from(message.embeds[0])
-                          .setDescription(`⏰ This contract offer has expired`);
-                        await message.edit({ embeds: [expiredEmbed] });
-                        break;
-                      }
-                    } catch (e) {
-                      console.error(`[Error] Failed to fetch or edit message in channel ${channel.id}:`, e);
-                      continue;
+              const channels = Array.from(client.guilds.cache.first()?.channels.cache.values() ?? []);
+              for (const channel of channels) {
+                if (channel?.type === ChannelType.GuildText) {
+                  try {
+                    const message = await channel.messages.fetch(metadata.offerMessageId);
+                    if (message) {
+                      const expiredEmbed = EmbedBuilder.from(message.embeds[0])
+                        .setDescription(`⏰ This contract offer has expired`);
+                      await message.edit({ embeds: [expiredEmbed] });
+                      break;
                     }
+                  } catch (e) {
+                    console.error(`[Error] Failed to fetch or edit message in channel ${channel.id}:`, e);
+                    continue;
                   }
                 }
               }
