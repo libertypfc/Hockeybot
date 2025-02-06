@@ -49,12 +49,11 @@ class DiscordBot extends Client {
       return false;
     }
 
-    // Check token format (typical Discord bot token format)
-    if (!/^[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}$/.test(token)) {
-      this.log('ERROR', 'Invalid token format');
-      return false;
-    }
+    // Log token length and prefix for debugging
+    this.log('DEBUG', `Token length: ${token.length}`);
+    this.log('DEBUG', `Token prefix: ${token.substring(0, 10)}...`);
 
+    // Accept any non-empty string token for now since format can vary
     return true;
   }
 
@@ -78,7 +77,7 @@ class DiscordBot extends Client {
         throw new Error('Invalid Discord token format');
       }
 
-      this.log('DEBUG', `Token validation passed, attempting connection...`);
+      this.log('DEBUG', 'Token validation passed, attempting connection...');
 
       try {
         await this.login(process.env.DISCORD_TOKEN);
