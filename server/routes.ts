@@ -4,11 +4,30 @@ import { startBot } from './bot';
 import { db } from '@db';
 import { teams, players, contracts, teamStats, playerStats, seasons, gameSchedule } from '@db/schema';
 import { eq, and, gte, lte, sql } from 'drizzle-orm';
+import { Client, GatewayIntentBits } from 'discord.js';
 
 export function registerRoutes(app: Express): Server {
   const port = process.env.PORT || 3000;
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
   // API Routes
+  app.get('/api/servers', async (req, res) => {
+    try {
+      await client.login(process.env.DISCORD_TOKEN);
+      const guilds = await client.guilds.fetch();
+
+      const servers = Array.from(guilds.values()).map(guild => ({
+        id: guild.id,
+        name: guild.name
+      }));
+
+      res.json(servers);
+    } catch (error) {
+      console.error('Error fetching servers:', error);
+      res.status(500).json({ error: 'Failed to fetch servers' });
+    }
+  });
+
   app.get('/api/teams', async (req, res) => {
     try {
       const { guildId } = req.query; // Get guildId from query params

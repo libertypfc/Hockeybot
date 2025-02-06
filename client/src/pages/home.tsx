@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ExemptionManager } from "@/components/ui/exemption-manager";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useState, useEffect } from "react";
 
 interface ExemptPlayer {
   username: string;
@@ -19,9 +21,32 @@ interface Team {
   exemptPlayers: ExemptPlayer[];
 }
 
+interface Server {
+  id: string;
+  name: string;
+}
+
 export default function Home() {
-  const { data: teams, isLoading, error } = useQuery<Team[]>({ 
-    queryKey: ['/api/teams'],
+  const [selectedServer, setSelectedServer] = useState<string>("");
+  const [servers, setServers] = useState<Server[]>([]);
+
+  // Fetch available servers
+  useEffect(() => {
+    fetch('/api/servers')
+      .then(res => res.json())
+      .then(data => {
+        setServers(data);
+        if (data.length > 0 && !selectedServer) {
+          setSelectedServer(data[0].id);
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  const { data: teams, isLoading, error } = useQuery<Team[]>({
+    queryKey: ['/api/teams', selectedServer],
+    enabled: !!selectedServer,
+    queryFn: () => fetch(`/api/teams?guildId=${selectedServer}`).then(res => res.json()),
   });
 
   return (
@@ -36,6 +61,24 @@ export default function Home() {
           </Link>
         </div>
 
+        <div className="w-full max-w-xs">
+          <Select
+            value={selectedServer}
+            onValueChange={setSelectedServer}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Select a server" />
+            </SelectTrigger>
+            <SelectContent>
+              {servers.map(server => (
+                <SelectItem key={server.id} value={server.id}>
+                  {server.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Card>
           <CardContent className="pt-6">
             <div className="space-y-6">
@@ -46,15 +89,13 @@ export default function Home() {
               <div>
                 <h2 className="text-xl font-semibold text-gray-800 mb-4">Current League Status</h2>
 
-                {isLoading && (
+                {!selectedServer ? (
+                  <p className="text-gray-600">Please select a server to view teams.</p>
+                ) : isLoading ? (
                   <p className="text-gray-600">Loading team information...</p>
-                )}
-
-                {error && (
+                ) : error ? (
                   <p className="text-red-600">Error loading team information. Please try again later.</p>
-                )}
-
-                {teams && teams.length > 0 ? (
+                ) : teams && teams.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {teams.map(team => (
                       <Card key={team.id} className="bg-white">
@@ -82,14 +123,16 @@ export default function Home() {
                       </Card>
                     ))}
                   </div>
-                ) : !isLoading && (
+                ) : (
                   <p className="text-gray-600">No teams found. Use Discord bot commands to create teams.</p>
                 )}
               </div>
 
-              <div className="mt-8">
-                <ExemptionManager />
-              </div>
+              {selectedServer && (
+                <div className="mt-8">
+                  <ExemptionManager serverId={selectedServer} />
+                </div>
+              )}
 
               <div className="mt-8">
                 <h2 className="text-lg font-semibold text-gray-800 mb-2">Available Features:</h2>
