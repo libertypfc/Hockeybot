@@ -78,7 +78,12 @@ export function registerRoutes(app: Express): Server {
       const team = await db.query.teams.findFirst({
         where: eq(teams.id, teamId),
         with: {
-          players: true,
+          players: {
+            where: and(
+              eq(players.currentTeamId, sql`${teamId}`),
+              eq(players.status, 'signed')
+            ),
+          },
         },
       });
 
@@ -107,6 +112,7 @@ export function registerRoutes(app: Express): Server {
         };
       });
 
+      console.log('Roster response:', roster); // Add logging for debugging
       res.json(roster);
     } catch (error) {
       console.error('Error fetching team roster:', error);
