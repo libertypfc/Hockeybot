@@ -75,14 +75,12 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ error: 'Invalid team ID' });
       }
 
+      // Get team with players
       const team = await db.query.teams.findFirst({
         where: eq(teams.id, teamId),
         with: {
           players: {
-            where: and(
-              eq(players.currentTeamId, sql`${teamId}`),
-              eq(players.status, 'signed')
-            ),
+            where: eq(players.currentTeamId, teamId),
           },
         },
       });
@@ -90,6 +88,10 @@ export function registerRoutes(app: Express): Server {
       if (!team) {
         return res.status(404).json({ error: 'Team not found' });
       }
+
+      console.log('Team found:', team.name);
+      console.log('Players count:', team.players.length);
+      console.log('Raw players data:', team.players);
 
       // Get active contracts for all players on the team
       const activeContracts = await db.query.contracts.findMany({
@@ -99,6 +101,8 @@ export function registerRoutes(app: Express): Server {
           gte(contracts.endDate, new Date())
         ),
       });
+
+      console.log('Active contracts found:', activeContracts.length);
 
       // Map players with their contract information
       const roster = team.players.map(player => {
@@ -112,7 +116,7 @@ export function registerRoutes(app: Express): Server {
         };
       });
 
-      console.log('Roster response:', roster); // Add logging for debugging
+      console.log('Final roster data:', roster);
       res.json(roster);
     } catch (error) {
       console.error('Error fetching team roster:', error);
