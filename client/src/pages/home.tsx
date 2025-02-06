@@ -28,26 +28,28 @@ interface Server {
 
 export default function Home() {
   const [selectedServer, setSelectedServer] = useState<string>("");
-  const [servers, setServers] = useState<Server[]>([]);
 
   // Fetch available servers
-  useEffect(() => {
-    fetch('/api/servers')
-      .then(res => res.json())
-      .then(data => {
-        setServers(data);
-        if (data.length > 0 && !selectedServer) {
-          setSelectedServer(data[0].id);
-        }
-      })
-      .catch(console.error);
-  }, []);
+  const { data: servers = [], isLoading: serversLoading } = useQuery<Server[]>({
+    queryKey: ['/api/servers'],
+    queryFn: () => fetch('/api/servers').then(res => res.json()),
+  });
 
-  const { data: teams, isLoading, error } = useQuery<Team[]>({
+  // Set initial server when data is loaded
+  useEffect(() => {
+    if (servers.length > 0 && !selectedServer) {
+      setSelectedServer(servers[0].id);
+    }
+  }, [servers]);
+
+  const { data: teams, isLoading: teamsLoading, error: teamsError } = useQuery<Team[]>({
     queryKey: ['/api/teams', selectedServer],
     enabled: !!selectedServer,
     queryFn: () => fetch(`/api/teams?guildId=${selectedServer}`).then(res => res.json()),
   });
+
+  console.log('Selected Server:', selectedServer);
+  console.log('Teams:', teams);
 
   return (
     <div className="min-h-screen w-full p-8 bg-gray-50">
@@ -62,21 +64,25 @@ export default function Home() {
         </div>
 
         <div className="w-full max-w-xs">
-          <Select
-            value={selectedServer}
-            onValueChange={setSelectedServer}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select a server" />
-            </SelectTrigger>
-            <SelectContent>
-              {servers.map(server => (
-                <SelectItem key={server.id} value={server.id}>
-                  {server.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {serversLoading ? (
+            <p>Loading servers...</p>
+          ) : (
+            <Select
+              value={selectedServer}
+              onValueChange={setSelectedServer}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a server" />
+              </SelectTrigger>
+              <SelectContent>
+                {servers.map(server => (
+                  <SelectItem key={server.id} value={server.id}>
+                    {server.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         <Card>
@@ -91,9 +97,9 @@ export default function Home() {
 
                 {!selectedServer ? (
                   <p className="text-gray-600">Please select a server to view teams.</p>
-                ) : isLoading ? (
+                ) : teamsLoading ? (
                   <p className="text-gray-600">Loading team information...</p>
-                ) : error ? (
+                ) : teamsError ? (
                   <p className="text-red-600">Error loading team information. Please try again later.</p>
                 ) : teams && teams.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

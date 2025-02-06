@@ -5,13 +5,18 @@ import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 import { Client, GatewayIntentBits } from 'discord.js';
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ComponentType, EmbedBuilder } from 'discord.js';
 
 let discordClient: Client | null = null;
 
 async function getDiscordClient() {
   if (!discordClient) {
-    discordClient = new Client({ intents: [GatewayIntentBits.Guilds] });
+    discordClient = new Client({ 
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessages
+      ] 
+    });
     await discordClient.login(process.env.DISCORD_TOKEN);
   }
   return discordClient;
@@ -25,12 +30,14 @@ export function registerRoutes(app: Express): Server {
     try {
       const client = await getDiscordClient();
       const guilds = await client.guilds.fetch();
+      console.log('Fetched guilds:', Array.from(guilds.values()));
 
       const servers = Array.from(guilds.values()).map(guild => ({
         id: guild.id,
         name: guild.name
       }));
 
+      console.log('Sending servers:', servers);
       res.json(servers);
     } catch (error) {
       console.error('Error fetching servers:', error);

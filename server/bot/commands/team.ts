@@ -50,10 +50,25 @@ export const TeamCommands = [
 
       try {
         const teamName = interaction.options.getString('name', true);
-        const guildId = interaction.guildId; // Get the current guild ID
+        const guildId = interaction.guildId;
 
         if (!guildId) {
           return interaction.editReply('This command can only be used in a server.');
+        }
+
+        // Check if team name already exists in this guild
+        const existingTeam = await db.select({
+          id: teams.id
+        })
+        .from(teams)
+        .where(and(
+          eq(teams.name, teamName),
+          eq(teams.guildId, guildId)
+        ))
+        .then(rows => rows[0]);
+
+        if (existingTeam) {
+          return interaction.editReply(`A team named "${teamName}" already exists in this server.`);
         }
 
         // Create category
@@ -66,7 +81,7 @@ export const TeamCommands = [
           return interaction.editReply('Failed to create team category');
         }
 
-        // Create text and voice channels
+        // Create channels
         const channels = [
           ['team-chat', ChannelType.GuildText],
           ['signing', ChannelType.GuildText],
@@ -75,7 +90,6 @@ export const TeamCommands = [
           ['team-voice', ChannelType.GuildVoice],
         ] as const;
 
-        // Create all standard channels in parallel
         await Promise.all(channels.map(([name, type]) =>
           interaction.guild!.channels.create({
             name,
@@ -110,15 +124,26 @@ export const TeamCommands = [
         });
 
         // Save team to database with guildId
-        await db.insert(teams).values({
+        const [newTeam] = await db.insert(teams).values({
           name: teamName,
           discordCategoryId: category.id,
-          guildId: guildId, // Include guildId when creating team
+          guildId: guildId,
           salaryCap: 82_500_000,
           availableCap: 82_500_000,
-        });
+        }).returning();
 
-        await interaction.editReply(`Team ${teamName} has been created successfully with all channels and roles!`);
+        const embed = new EmbedBuilder()
+          .setTitle('Team Created')
+          .setDescription(`Team "${teamName}" has been created successfully!`)
+          .addFields(
+            { name: 'Category', value: category.name },
+            { name: 'Role', value: role.name },
+            { name: 'Guild ID', value: guildId }
+          )
+          .setColor('#00FF00')
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
       } catch (error) {
         console.error('Error creating team:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -980,22 +1005,12 @@ export const TeamCommands = [
           .set({ capFloor: newFloor })
           .where(eq(teams.id, team.id));
 
-        const embed = new EmbedBuilder()
-          .setTitle('Salary Cap Floor Updated')
-          .setDescription(`Updated salary cap floor for ${team.name}`)
-          .addFields(
-            { name: 'Previous Floor', value: `$${(team.capFloor ?? 0).toLocaleString()}` },
-            { name: 'New Floor', value: `$${newFloor.toLocaleString()}` }
-          )
-          .setColor('#00FF00')
-          .setTimestamp();
-
-        await interaction.editReply({ embeds: [embed] });
+        await interaction.editReply(`Updated salary cap floor for ${team.name} to $${newFloor.toLocaleString()}`);
 
       } catch (error) {
-        console.error('Error setting salary cap floor:', error);
+        console.error('Error setting cap floor:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        await interaction.editReply(`Failed to set salary cap floor: ${errorMessage}`);
+        await interaction.editReply(`Failed to set cap floor: ${errorMessage}`);
       }
     },
   },
