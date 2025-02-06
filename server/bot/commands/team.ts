@@ -106,26 +106,7 @@ export const TeamCommands = [
           interaction.guild!.channels.create({
             name,
             type,
-            parent: category.id,
-            ...(name === 'stats-pictures' ? {
-              rateLimitPerUser: 30,
-              nsfw: false,
-              permissionOverwrites: [
-                {
-                  id: interaction.guild!.roles.everyone.id,
-                  allow: [
-                    PermissionFlagsBits.ViewChannel,
-                    PermissionFlagsBits.SendMessages,
-                    PermissionFlagsBits.AttachFiles,
-                    PermissionFlagsBits.EmbedLinks,
-                  ],
-                  deny: [
-                    PermissionFlagsBits.CreatePublicThreads,
-                    PermissionFlagsBits.CreatePrivateThreads,
-                  ]
-                }
-              ]
-            } : {})
+            parent: category.id
           })
         ));
 
@@ -148,13 +129,13 @@ export const TeamCommands = [
             availableCap: 82_500_000,
           });
 
-          // Save team to database with guildId
+          // Save team to database with only the required fields
           const [newTeam] = await db.insert(teams).values({
             name: teamName,
-            discordCategoryId: category.id,
-            guildId: guildId,
-            salaryCap: 82_500_000,
-            availableCap: 82_500_000,
+            discord_category_id: category.id,
+            guild_id: guildId,
+            salary_cap: 82_500_000,
+            available_cap: 82_500_000,
           }).returning();
 
           console.log('Successfully saved team to database:', newTeam);
@@ -985,7 +966,7 @@ export const TeamCommands = [
         await interaction.editReply(`Failed to set salary cap: ${errorMessage}`);
       }
     },
-    },
+  },
   {
     data: new SlashCommandBuilder()
       .setName('setfloor')
