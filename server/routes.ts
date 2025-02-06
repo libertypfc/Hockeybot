@@ -55,16 +55,16 @@ export function registerRoutes(app: Express): Server {
 
       console.log('Fetching teams for guild:', guildId);
 
-      // Get teams for specific guild
+      // Get teams for specific guild using correct column names
       const allTeams = await db.select({
         id: teams.id,
         name: teams.name,
-        salaryCap: teams.salaryCap,
-        guildId: teams.guildId,
-        availableCap: teams.availableCap,
+        salaryCap: teams.salary_cap,
+        guildId: teams.guild_id,
+        availableCap: teams.available_cap,
       })
       .from(teams)
-      .where(eq(teams.guildId, guildId as string));
+      .where(eq(teams.guild_id, guildId as string));
 
       console.log('Found teams:', allTeams);
 
