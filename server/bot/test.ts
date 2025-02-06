@@ -45,13 +45,11 @@ async function testBot() {
   }
 }
 
-export { testBot };
+// Run the test
+testBot().then(success => {
+  if (!success) {
+    process.exit(1);
+  }
+});
 
-// Run the test if this file is imported directly
-if (import.meta.url === import.meta.resolve('./test.ts')) {
-  testBot().then(success => {
-    if (!success) {
-      process.exit(1);
-    }
-  });
-}
+export { testBot };

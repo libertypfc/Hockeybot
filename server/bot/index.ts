@@ -304,10 +304,12 @@ export class DiscordBot extends Client {
 
       // Modified token validation to be less restrictive
       const token = process.env.DISCORD_TOKEN.trim();
+      this.log('DEBUG', `Provided token: ${token.slice(0, 32)}.${'*'.repeat(27)}`);
       if (!token || token.length < 50) {  // Basic length check instead of strict regex
         throw new Error('Discord token appears to be invalid (too short)');
       }
 
+      this.log('DEBUG', 'Preparing to connect to the gateway...');
       this.log('INFO', 'Attempting to connect to Discord...');
       this.log('DEBUG', `Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
 
@@ -343,6 +345,7 @@ export class DiscordBot extends Client {
       } catch (error) {
         this.connectionState = 'failed';
         this.log('ERROR', `Connection attempt failed: ${error}`);
+        this.log('ERROR', error instanceof Error ? error.stack : 'No stack trace available');
 
         if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
           this.reconnectAttempt++;
@@ -354,9 +357,11 @@ export class DiscordBot extends Client {
           throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
         }
       }
+
     } catch (error) {
       this.connectionState = 'error';
       this.log('ERROR', `Failed to start bot: ${error}`);
+      this.log('ERROR', error instanceof Error ? error.stack : 'No stack trace available');
       this.isConnecting = false;
       throw error;
     }
