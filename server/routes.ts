@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { startBot } from './bot';
 import { db } from '@db';
-import { teams, players, contracts, teamStats, playerStats, seasons, gameSchedule } from '@db/schema';
-import { eq, and, gte, lte, sql } from 'drizzle-orm';
+import { teams, players, contracts } from '@db/schema';
+import { eq, and, gte } from 'drizzle-orm';
 import { Client, GatewayIntentBits } from 'discord.js';
 
 let discordClient: Client | null = null;
@@ -39,44 +39,53 @@ export function registerRoutes(app: Express): Server {
 
   app.get('/api/teams', async (req, res) => {
     try {
-      const { guildId } = req.query; // Get guildId from query params
+      const { guildId } = req.query;
 
       if (!guildId) {
         return res.status(400).json({ error: 'Guild ID is required' });
       }
 
-      const allTeams = await db.query.teams.findMany({
-        where: eq(teams.guildId, guildId as string),
-        with: {
-          players: true,
-          contracts: {
-            where: and(
-              eq(contracts.status, 'active'),
-              gte(contracts.endDate, new Date())
-            )
-          }
-        }
-      });
+      // Get teams for specific guild
+      const allTeams = await db.select({
+        id: teams.id,
+        name: teams.name,
+        salaryCap: teams.salaryCap,
+        guildId: teams.guildId,
+        availableCap: teams.availableCap,
+      })
+      .from(teams)
+      .where(eq(teams.guildId, guildId as string));
 
+      // Get players and contracts for each team
       const teamsWithStats = await Promise.all(allTeams.map(async team => {
-        const currentTeamContracts = await db.query.contracts.findMany({
-          where: and(
-            eq(contracts.status, 'active'),
-            gte(contracts.endDate, new Date()),
-            sql`${contracts.playerId} IN (
-              SELECT id FROM ${players}
-              WHERE current_team_id = ${team.id}
-            )`
-          ),
-        });
+        // Get players for this team
+        const teamPlayers = await db.select({
+          id: players.id,
+          username: players.username,
+          discordId: players.discordId,
+          salaryExempt: players.salaryExempt,
+        })
+        .from(players)
+        .where(eq(players.currentTeamId, team.id));
 
-        const totalSalary = currentTeamContracts.reduce((sum, contract) => {
-          return sum + contract.salary;
+        // Get active contracts for this team
+        const teamContracts = await db.select({
+          playerId: contracts.playerId,
+          salary: contracts.salary,
+        })
+        .from(contracts)
+        .where(and(
+          eq(contracts.teamId, team.id),
+          eq(contracts.status, 'active'),
+          gte(contracts.endDate, new Date())
+        ));
+
+        const totalSalary = teamContracts.reduce((sum, contract) => {
+          const player = teamPlayers.find(p => p.id === contract.playerId);
+          return sum + (player?.salaryExempt ? 0 : contract.salary);
         }, 0);
 
-        const availableCap = (team.salaryCap || 82500000) - totalSalary;
-
-        const exemptPlayers = team.players
+        const exemptPlayers = teamPlayers
           .filter(player => player.salaryExempt)
           .map(player => ({
             username: player.username,
@@ -86,11 +95,11 @@ export function registerRoutes(app: Express): Server {
         return {
           id: team.id,
           name: team.name,
-          salaryCap: team.salaryCap,
-          availableCap: availableCap,
-          totalSalary: totalSalary,
-          playerCount: team.players.length,
-          exemptPlayers: exemptPlayers
+          salaryCap: team.salaryCap || 82500000,
+          availableCap: (team.salaryCap || 82500000) - totalSalary,
+          totalSalary,
+          playerCount: teamPlayers.length,
+          exemptPlayers
         };
       }));
 
