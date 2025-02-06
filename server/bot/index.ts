@@ -4,6 +4,7 @@ import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
 import { registerCommands } from './commands';
 import { checkCapCompliance } from './commands/admin';
+import { initializeAchievements, checkUptimeAchievements } from './achievements';
 
 declare module 'discord.js' {
   interface Client {
@@ -382,7 +383,7 @@ export class DiscordBot extends Client {
 
     if (!this.isConnecting) {
       this.reconnectAttempt = 0;
-      this.attemptReconnect().catch(e => 
+      this.attemptReconnect().catch(e =>
         this.log(`Reconnection failed: ${e.message}`, 'error')
       );
     }
@@ -393,10 +394,10 @@ export class DiscordBot extends Client {
   }
 
   private handleDebug(message: string) {
-    if (message.includes('Session Limit Information') || 
-        message.includes('Gateway') || 
-        message.includes('Heartbeat') ||
-        message.includes('WebSocket')) {
+    if (message.includes('Session Limit Information') ||
+      message.includes('Gateway') ||
+      message.includes('Heartbeat') ||
+      message.includes('WebSocket')) {
       this.log(message, 'debug');
     }
   }
@@ -409,21 +410,32 @@ export class DiscordBot extends Client {
     this.startConnectionMonitor();
 
     try {
+      // Initialize achievements
+      await initializeAchievements();
+      this.log('Achievements initialized', 'info');
+
       await registerCommands(this);
       this.log('Commands registered successfully', 'info');
 
       // Start periodic tasks with error handling
       setInterval(() => {
-        checkExpiredContracts().catch(error => 
+        checkExpiredContracts().catch(error =>
           this.log(`Error checking expired contracts: ${error}`, 'error')
         );
       }, 5 * 60 * 1000);
 
       setInterval(() => {
-        checkCapCompliance(this).catch(error => 
+        checkCapCompliance(this).catch(error =>
           this.log(`Error checking cap compliance: ${error}`, 'error')
         );
       }, 15 * 60 * 1000);
+
+      // Check achievements every hour
+      setInterval(() => {
+        checkUptimeAchievements(this).catch(error =>
+          this.log(`Error checking uptime achievements: ${error}`, 'error')
+        );
+      }, 60 * 60 * 1000); // Every hour
 
     } catch (error) {
       this.log(`Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
@@ -471,7 +483,7 @@ export class DiscordBot extends Client {
       // Attempt login with timeout
       await Promise.race([
         this.login(process.env.DISCORD_TOKEN),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Login timed out')), timeout)
         )
       ]);

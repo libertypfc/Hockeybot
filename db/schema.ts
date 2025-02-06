@@ -256,6 +256,42 @@ export const selectTradeAdminSettingsSchema = createSelectSchema(tradeAdminSetti
 export const insertTradeProposalSchema = createInsertSchema(tradeProposals);
 export const selectTradeProposalSchema = createSelectSchema(tradeProposals);
 
+export const achievements = pgTable("achievements", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  type: text("type").notNull(), // 'uptime', 'commands', etc.
+  requirement: integer("requirement").notNull(), // e.g., hours for uptime
+  icon: text("icon").notNull(), // Icon/emoji representation
+  color: text("color").notNull(), // Color hex code for the badge
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const botUptimeAchievements = pgTable("bot_uptime_achievements", {
+  id: serial("id").primaryKey(),
+  achievementId: integer("achievement_id").references(() => achievements.id).notNull(),
+  earnedAt: timestamp("earned_at").defaultNow(),
+  uptimeHours: integer("uptime_hours").notNull(),
+  metadata: text("metadata"), // Additional achievement-specific data
+});
+
+export const achievementsRelations = relations(achievements, ({ many }) => ({
+  botUptimeAchievements: many(botUptimeAchievements),
+}));
+
+export const botUptimeAchievementsRelations = relations(botUptimeAchievements, ({ one }) => ({
+  achievement: one(achievements, {
+    fields: [botUptimeAchievements.achievementId],
+    references: [achievements.id],
+  }),
+}));
+
+export const insertAchievementSchema = createInsertSchema(achievements);
+export const selectAchievementSchema = createSelectSchema(achievements);
+
+export const insertBotUptimeAchievementSchema = createInsertSchema(botUptimeAchievements);
+export const selectBotUptimeAchievementSchema = createSelectSchema(botUptimeAchievements);
+
 export type PlayerStats = typeof playerStats.$inferSelect;
 export type GoalieStats = typeof goalieStats.$inferSelect;
 export type Team = typeof teams.$inferSelect;
@@ -269,3 +305,5 @@ export type Season = typeof seasons.$inferSelect;
 export type GameSchedule = typeof gameSchedule.$inferSelect;
 export type TradeAdminSettings = typeof tradeAdminSettings.$inferSelect;
 export type TradeProposal = typeof tradeProposals.$inferSelect;
+export type Achievement = typeof achievements.$inferSelect;
+export type BotUptimeAchievement = typeof botUptimeAchievements.$inferSelect;
