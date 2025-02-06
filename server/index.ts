@@ -39,32 +39,13 @@ app.use((req, res, next) => {
 
 let isStarting = false;
 let startupError: Error | null = null;
-let retryAttempts = 0;
-const MAX_RETRY_ATTEMPTS = 5;
 
 async function startApplication() {
   if (isStarting) return;
   isStarting = true;
 
   try {
-    // Start Discord bot first with retry logic
-    let discordClient = null;
-    let attempts = 0;
-    while (!discordClient && attempts < 3) {
-      discordClient = await startBot();
-      if (!discordClient) {
-        attempts++;
-        log(`Discord bot startup attempt ${attempts} failed, retrying...`, 'startup');
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-    }
-
-    if (!discordClient) {
-      throw new Error('Failed to initialize Discord bot after multiple attempts');
-    }
-    log('Discord bot started successfully', 'startup');
-
-    // Create HTTP server
+    // Create HTTP server first
     const httpServer = createServer(app);
 
     // Initialize routes
@@ -84,33 +65,39 @@ async function startApplication() {
         await setupVite(app, httpServer);
       } catch (error) {
         console.error("Failed to setup Vite:", error);
-        // Continue even if Vite setup fails - we still want the bot to work
       }
     } else {
       serveStatic(app);
     }
 
-    // Start the HTTP server
+    // Start the HTTP server first
     const PORT = Number(process.env.PORT) || 5000;
-    httpServer.listen(PORT, "0.0.0.0", () => {
-      log(`HTTP server listening on port ${PORT}`, 'startup');
-      retryAttempts = 0; // Reset retry attempts on successful startup
+    await new Promise<void>((resolve) => {
+      httpServer.listen(PORT, "0.0.0.0", () => {
+        log(`HTTP server listening on port ${PORT}`, 'startup');
+        resolve();
+      });
     });
+
+    // Start Discord bot with delay to ensure server is ready
+    setTimeout(async () => {
+      try {
+        const discordClient = await startBot();
+        if (discordClient) {
+          log('Discord bot started successfully', 'startup');
+        }
+      } catch (error) {
+        log(`Error starting Discord bot: ${error}`, 'startup');
+        // Don't throw error here, let the bot's internal reconnection handle it
+      }
+    }, 5000); // 5 second delay before starting bot
 
     return true;
   } catch (error) {
     startupError = error as Error;
     log(`Critical startup error: ${error}`, 'startup');
     console.error('Startup error:', error);
-
-    retryAttempts++;
-    if (retryAttempts < MAX_RETRY_ATTEMPTS) {
-      log(`Retrying startup (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})...`, 'startup');
-      setTimeout(startApplication, 5000);
-    } else {
-      log('Max retry attempts reached. Please check logs and restart manually.', 'startup');
-      process.exit(1);
-    }
+    throw error;
   } finally {
     isStarting = false;
   }
