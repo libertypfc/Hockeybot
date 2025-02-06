@@ -82,18 +82,25 @@ async function startApplication() {
     // Start Discord bot with delay to ensure server is ready
     setTimeout(async () => {
       try {
-        console.log('[Startup] Attempting to start Discord bot...');
+        console.log('='.repeat(50));
+        console.log('[BOT STARTUP] Attempting to start Discord bot...');
+        console.log('='.repeat(50));
         const discordClient = await startBot();
         if (discordClient && discordClient.isReady()) {
-          console.log('[Startup] Discord bot started successfully and is online');
-          console.log(`[Startup] Bot username: ${discordClient.user?.tag}`);
-          console.log(`[Startup] Connected to ${discordClient.guilds.cache.size} guilds`);
+          console.log('='.repeat(50));
+          console.log('[BOT STARTUP] Discord bot started successfully and is online');
+          console.log(`[BOT STARTUP] Bot username: ${discordClient.user?.tag}`);
+          console.log(`[BOT STARTUP] Connected to ${discordClient.guilds.cache.size} guilds`);
+          console.log('='.repeat(50));
         } else {
-          console.error('[Startup] Discord bot started but is not ready');
+          console.error('='.repeat(50));
+          console.error('[BOT STARTUP ERROR] Discord bot started but is not ready');
+          console.error('='.repeat(50));
         }
       } catch (error) {
-        console.error('[Error] Failed to start Discord bot:', error);
-        // Don't throw error here, let the bot's internal reconnection handle it
+        console.error('='.repeat(50));
+        console.error('[BOT STARTUP ERROR] Failed to start Discord bot:', error);
+        console.error('='.repeat(50));
       }
     }, 5000); // 5 second delay before starting bot
 

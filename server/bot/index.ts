@@ -47,7 +47,8 @@ export class DiscordBot extends Client {
 
   private log(level: string, message: string) {
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`);
+    const separator = '='.repeat(50);
+    console.log(`${separator}\n[${timestamp}] [BOT ${level.toUpperCase()}] ${message}\n${separator}`);
   }
 
   private setupEventHandlers() {
@@ -304,14 +305,14 @@ export class DiscordBot extends Client {
 
       // Modified token validation to be less restrictive
       const token = process.env.DISCORD_TOKEN.trim();
-      this.log('DEBUG', `Provided token: ${token.slice(0, 32)}.${'*'.repeat(27)}`);
-      if (!token || token.length < 50) {  // Basic length check instead of strict regex
+      this.log('DEBUG', `Token validation: ${token.slice(0, 10)}...${token.slice(-10)}`);
+
+      if (!token || token.length < 50) {
         throw new Error('Discord token appears to be invalid (too short)');
       }
 
       this.log('DEBUG', 'Preparing to connect to the gateway...');
-      this.log('INFO', 'Attempting to connect to Discord...');
-      this.log('DEBUG', `Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
+      this.log('INFO', `Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
 
       try {
         const loginPromise = this.login(token);
@@ -319,7 +320,7 @@ export class DiscordBot extends Client {
           setTimeout(() => reject(new Error('Login timed out')), this.CONNECT_TIMEOUT);
         });
 
-        this.log('DEBUG', 'Attempting login...');
+        this.log('DEBUG', 'Attempting Discord gateway login...');
         await Promise.race([loginPromise, timeoutPromise]);
         this.log('INFO', 'Login successful, waiting for ready event...');
 
@@ -333,7 +334,7 @@ export class DiscordBot extends Client {
           this.once(Events.ClientReady, () => {
             this.log('DEBUG', 'Received ready event');
             clearTimeout(timeout);
-            this.log('INFO', 'Ready event received');
+            this.log('INFO', 'Ready event received, bot is fully operational');
             resolve();
           });
         });
@@ -345,7 +346,7 @@ export class DiscordBot extends Client {
       } catch (error) {
         this.connectionState = 'failed';
         this.log('ERROR', `Connection attempt failed: ${error}`);
-        this.log('ERROR', error instanceof Error ? error.stack : 'No stack trace available');
+        this.log('ERROR', error instanceof Error ? error.stack || 'No stack trace available' : 'Unknown error');
 
         if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
           this.reconnectAttempt++;
@@ -361,7 +362,7 @@ export class DiscordBot extends Client {
     } catch (error) {
       this.connectionState = 'error';
       this.log('ERROR', `Failed to start bot: ${error}`);
-      this.log('ERROR', error instanceof Error ? error.stack : 'No stack trace available');
+      this.log('ERROR', error instanceof Error ? error.stack || 'No stack trace available' : 'Unknown error');
       this.isConnecting = false;
       throw error;
     }
