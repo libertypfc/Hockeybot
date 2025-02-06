@@ -2,10 +2,28 @@ import { pgTable, text, serial, integer, boolean, timestamp, unique, decimal } f
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { relations, sql } from "drizzle-orm";
 
+// Add new tables for conferences and divisions
+export const conferences = pgTable("conferences", {
+  id: serial("id").primaryKey(),
+  name: text("name").unique().notNull(),
+  abbreviation: text("abbreviation").unique().notNull(),
+  metadata: text("metadata"),
+});
+
+export const divisions = pgTable("divisions", {
+  id: serial("id").primaryKey(),
+  name: text("name").unique().notNull(),
+  abbreviation: text("abbreviation").unique().notNull(),
+  conferenceId: integer("conference_id").references(() => conferences.id).notNull(),
+  metadata: text("metadata"),
+});
+
+// Update teams table to include division reference
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: text("name").unique().notNull(),
   discordCategoryId: text("discord_category_id").notNull(),
+  divisionId: integer("division_id").references(() => divisions.id),
   salaryCap: integer("salary_cap").default(82500000),
   capFloor: integer("cap_floor").default(3000000),
   availableCap: integer("available_cap").default(82500000),
@@ -70,39 +88,6 @@ export const waiverSettings = pgTable("waiver_settings", {
   gmRoleId: text("gm_role_id").notNull(),
 });
 
-export const teamsRelations = relations(teams, ({ many }) => ({
-  players: many(players),
-  contracts: many(contracts),
-  teamStats: many(teamStats),
-}));
-
-export const teamStatsRelations = relations(teamStats, ({ one }) => ({
-  team: one(teams, {
-    fields: [teamStats.teamId],
-    references: [teams.id],
-  }),
-}));
-
-export const playersRelations = relations(players, ({ one, many }) => ({
-  currentTeam: one(teams, {
-    fields: [players.currentTeamId],
-    references: [teams.id],
-  }),
-  playerStats: many(playerStats),
-  goalieStats: many(goalieStats),
-}));
-
-export const contractsRelations = relations(contracts, ({ one }) => ({
-  player: one(players, {
-    fields: [contracts.playerId],
-    references: [players.id],
-  }),
-  team: one(teams, {
-    fields: [contracts.teamId],
-    references: [teams.id],
-  }),
-}));
-
 export const playerStats = pgTable("player_stats", {
   id: serial("id").primaryKey(),
   playerId: integer("player_id").references(() => players.id).notNull(),
@@ -132,6 +117,103 @@ export const goalieStats = pgTable("goalie_stats", {
   timeInNet: integer("time_in_net").default(0),
 });
 
+export const seasons = pgTable("seasons", {
+  id: serial("id").primaryKey(),
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  numberOfWeeks: integer("number_of_weeks").notNull(),
+  status: text("status").default("pending"), // pending, active, completed
+  metadata: text("metadata"),
+});
+
+export const gameSchedule = pgTable("game_schedule", {
+  id: serial("id").primaryKey(),
+  seasonId: integer("season_id").references(() => seasons.id).notNull(),
+  homeTeamId: integer("home_team_id").references(() => teams.id).notNull(),
+  awayTeamId: integer("away_team_id").references(() => teams.id).notNull(),
+  gameDate: timestamp("game_date").notNull(),
+  gameNumber: integer("game_number").notNull(), // 1 or 2 for same-night games
+  status: text("status").default("scheduled"), // scheduled, completed, cancelled
+  homeScore: integer("home_score"),
+  awayScore: integer("away_score"),
+  metadata: text("metadata"),
+});
+
+export const tradeAdminSettings = pgTable("trade_admin_settings", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").unique().notNull(),
+  adminChannelId: text("admin_channel_id").notNull(),
+});
+
+export const tradeProposals = pgTable("trade_proposals", {
+  id: serial("id").primaryKey(),
+  fromTeamId: integer("from_team_id").references(() => teams.id).notNull(),
+  toTeamId: integer("to_team_id").references(() => teams.id).notNull(),
+  playerId: integer("player_id").references(() => players.id).notNull(),
+  status: text("status").default("pending"), // pending, accepted, rejected, admin_approved, admin_rejected
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  messageId: text("message_id"), // Discord message ID for reference
+  adminMessageId: text("admin_message_id"), // Admin channel message ID
+});
+
+export const achievements = pgTable("achievements", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  type: text("type").notNull(), // 'uptime', 'commands', etc.
+  requirement: integer("requirement").notNull(), // e.g., hours for uptime
+  icon: text("icon").notNull(), // Icon/emoji representation
+  color: text("color").notNull(), // Color hex code for the badge
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const botUptimeAchievements = pgTable("bot_uptime_achievements", {
+  id: serial("id").primaryKey(),
+  achievementId: integer("achievement_id").references(() => achievements.id).notNull(),
+  earnedAt: timestamp("earned_at").defaultNow(),
+  uptimeHours: integer("uptime_hours").notNull(),
+  metadata: text("metadata"), // Additional achievement-specific data
+});
+
+
+export const teamsRelations = relations(teams, ({ many, one }) => ({
+  players: many(players),
+  contracts: many(contracts),
+  teamStats: many(teamStats),
+  division: one(divisions, {
+    fields: [teams.divisionId],
+    references: [divisions.id],
+  }),
+}));
+
+export const teamStatsRelations = relations(teamStats, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamStats.teamId],
+    references: [teams.id],
+  }),
+}));
+
+export const playersRelations = relations(players, ({ one, many }) => ({
+  currentTeam: one(teams, {
+    fields: [players.currentTeamId],
+    references: [teams.id],
+  }),
+  playerStats: many(playerStats),
+  goalieStats: many(goalieStats),
+}));
+
+export const contractsRelations = relations(contracts, ({ one }) => ({
+  player: one(players, {
+    fields: [contracts.playerId],
+    references: [players.id],
+  }),
+  team: one(teams, {
+    fields: [contracts.teamId],
+    references: [teams.id],
+  }),
+}));
+
 export const playerStatsRelations = relations(playerStats, ({ one }) => ({
   player: one(players, {
     fields: [playerStats.playerId],
@@ -144,6 +226,59 @@ export const goalieStatsRelations = relations(goalieStats, ({ one }) => ({
     fields: [goalieStats.playerId],
     references: [players.id],
   }),
+}));
+
+export const gameScheduleRelations = relations(gameSchedule, ({ one }) => ({
+  season: one(seasons, {
+    fields: [gameSchedule.seasonId],
+    references: [seasons.id],
+  }),
+  homeTeam: one(teams, {
+    fields: [gameSchedule.homeTeamId],
+    references: [teams.id],
+  }),
+  awayTeam: one(teams, {
+    fields: [gameSchedule.awayTeamId],
+    references: [teams.id],
+  }),
+}));
+
+export const tradeProposalsRelations = relations(tradeProposals, ({ one }) => ({
+  fromTeam: one(teams, {
+    fields: [tradeProposals.fromTeamId],
+    references: [teams.id],
+  }),
+  toTeam: one(teams, {
+    fields: [tradeProposals.toTeamId],
+    references: [teams.id],
+  }),
+  player: one(players, {
+    fields: [tradeProposals.playerId],
+    references: [players.id],
+  }),
+}));
+
+export const achievementsRelations = relations(achievements, ({ many }) => ({
+  botUptimeAchievements: many(botUptimeAchievements),
+}));
+
+export const botUptimeAchievementsRelations = relations(botUptimeAchievements, ({ one }) => ({
+  achievement: one(achievements, {
+    fields: [botUptimeAchievements.achievementId],
+    references: [achievements.id],
+  }),
+}));
+
+export const conferencesRelations = relations(conferences, ({ many }) => ({
+  divisions: many(divisions),
+}));
+
+export const divisionsRelations = relations(divisions, ({ one, many }) => ({
+  conference: one(conferences, {
+    fields: [divisions.conferenceId],
+    references: [conferences.id],
+  }),
+  teams: many(teams),
 }));
 
 export const insertTeamSchema = createInsertSchema(teams);
@@ -173,82 +308,11 @@ export const selectGuildSettingsSchema = createSelectSchema(guildSettings);
 export const insertTeamStatsSchema = createInsertSchema(teamStats);
 export const selectTeamStatsSchema = createSelectSchema(teamStats);
 
-export const seasons = pgTable("seasons", {
-  id: serial("id").primaryKey(),
-  startDate: timestamp("start_date").notNull(),
-  endDate: timestamp("end_date").notNull(),
-  numberOfWeeks: integer("number_of_weeks").notNull(),
-  status: text("status").default("pending"), // pending, active, completed
-  metadata: text("metadata"),
-});
-
-export const gameSchedule = pgTable("game_schedule", {
-  id: serial("id").primaryKey(),
-  seasonId: integer("season_id").references(() => seasons.id).notNull(),
-  homeTeamId: integer("home_team_id").references(() => teams.id).notNull(),
-  awayTeamId: integer("away_team_id").references(() => teams.id).notNull(),
-  gameDate: timestamp("game_date").notNull(),
-  gameNumber: integer("game_number").notNull(), // 1 or 2 for same-night games
-  status: text("status").default("scheduled"), // scheduled, completed, cancelled
-  homeScore: integer("home_score"),
-  awayScore: integer("away_score"),
-  metadata: text("metadata"),
-});
-
-export const gameScheduleRelations = relations(gameSchedule, ({ one }) => ({
-  season: one(seasons, {
-    fields: [gameSchedule.seasonId],
-    references: [seasons.id],
-  }),
-  homeTeam: one(teams, {
-    fields: [gameSchedule.homeTeamId],
-    references: [teams.id],
-  }),
-  awayTeam: one(teams, {
-    fields: [gameSchedule.awayTeamId],
-    references: [teams.id],
-  }),
-}));
-
 export const insertSeasonSchema = createInsertSchema(seasons);
 export const selectSeasonSchema = createSelectSchema(seasons);
 
 export const insertGameScheduleSchema = createInsertSchema(gameSchedule);
 export const selectGameScheduleSchema = createSelectSchema(gameSchedule);
-
-
-export const tradeAdminSettings = pgTable("trade_admin_settings", {
-  id: serial("id").primaryKey(),
-  guildId: text("guild_id").unique().notNull(),
-  adminChannelId: text("admin_channel_id").notNull(),
-});
-
-export const tradeProposals = pgTable("trade_proposals", {
-  id: serial("id").primaryKey(),
-  fromTeamId: integer("from_team_id").references(() => teams.id).notNull(),
-  toTeamId: integer("to_team_id").references(() => teams.id).notNull(),
-  playerId: integer("player_id").references(() => players.id).notNull(),
-  status: text("status").default("pending"), // pending, accepted, rejected, admin_approved, admin_rejected
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-  messageId: text("message_id"), // Discord message ID for reference
-  adminMessageId: text("admin_message_id"), // Admin channel message ID
-});
-
-export const tradeProposalsRelations = relations(tradeProposals, ({ one }) => ({
-  fromTeam: one(teams, {
-    fields: [tradeProposals.fromTeamId],
-    references: [teams.id],
-  }),
-  toTeam: one(teams, {
-    fields: [tradeProposals.toTeamId],
-    references: [teams.id],
-  }),
-  player: one(players, {
-    fields: [tradeProposals.playerId],
-    references: [players.id],
-  }),
-}));
 
 export const insertTradeAdminSettingsSchema = createInsertSchema(tradeAdminSettings);
 export const selectTradeAdminSettingsSchema = createSelectSchema(tradeAdminSettings);
@@ -256,41 +320,17 @@ export const selectTradeAdminSettingsSchema = createSelectSchema(tradeAdminSetti
 export const insertTradeProposalSchema = createInsertSchema(tradeProposals);
 export const selectTradeProposalSchema = createSelectSchema(tradeProposals);
 
-export const achievements = pgTable("achievements", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull(),
-  type: text("type").notNull(), // 'uptime', 'commands', etc.
-  requirement: integer("requirement").notNull(), // e.g., hours for uptime
-  icon: text("icon").notNull(), // Icon/emoji representation
-  color: text("color").notNull(), // Color hex code for the badge
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const botUptimeAchievements = pgTable("bot_uptime_achievements", {
-  id: serial("id").primaryKey(),
-  achievementId: integer("achievement_id").references(() => achievements.id).notNull(),
-  earnedAt: timestamp("earned_at").defaultNow(),
-  uptimeHours: integer("uptime_hours").notNull(),
-  metadata: text("metadata"), // Additional achievement-specific data
-});
-
-export const achievementsRelations = relations(achievements, ({ many }) => ({
-  botUptimeAchievements: many(botUptimeAchievements),
-}));
-
-export const botUptimeAchievementsRelations = relations(botUptimeAchievements, ({ one }) => ({
-  achievement: one(achievements, {
-    fields: [botUptimeAchievements.achievementId],
-    references: [achievements.id],
-  }),
-}));
-
 export const insertAchievementSchema = createInsertSchema(achievements);
 export const selectAchievementSchema = createSelectSchema(achievements);
 
 export const insertBotUptimeAchievementSchema = createInsertSchema(botUptimeAchievements);
 export const selectBotUptimeAchievementSchema = createSelectSchema(botUptimeAchievements);
+
+export const insertConferenceSchema = createInsertSchema(conferences);
+export const selectConferenceSchema = createSelectSchema(conferences);
+
+export const insertDivisionSchema = createInsertSchema(divisions);
+export const selectDivisionSchema = createSelectSchema(divisions);
 
 export type PlayerStats = typeof playerStats.$inferSelect;
 export type GoalieStats = typeof goalieStats.$inferSelect;
@@ -307,3 +347,5 @@ export type TradeAdminSettings = typeof tradeAdminSettings.$inferSelect;
 export type TradeProposal = typeof tradeProposals.$inferSelect;
 export type Achievement = typeof achievements.$inferSelect;
 export type BotUptimeAchievement = typeof botUptimeAchievements.$inferSelect;
+export type Conference = typeof conferences.$inferSelect;
+export type Division = typeof divisions.$inferSelect;

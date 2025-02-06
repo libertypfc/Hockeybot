@@ -6,6 +6,7 @@ import { TradeCommands } from './trade';
 import { DatabaseCommands } from './database';
 import { AdminCommands } from './admin';
 import { SeasonCommands } from './season';
+import { OrganizationCommands } from './organization';
 
 export async function registerCommands(client: Client) {
   if (!client.user) {
@@ -23,6 +24,7 @@ export async function registerCommands(client: Client) {
     ...DatabaseCommands,
     ...AdminCommands,
     ...SeasonCommands,
+    ...OrganizationCommands,
   ];
 
   console.log(`Registering ${commands.length} commands...`);
