@@ -374,6 +374,15 @@ export async function startBot(): Promise<DiscordBot> {
   return new Promise((resolve, reject) => {
     console.log('[Status] Starting Discord bot...');
 
+    // Check if token exists and basic validation
+    const token = process.env.DISCORD_TOKEN;
+    if (!token) {
+      console.error('[Error] Discord token is missing');
+      reject(new Error('Discord token is missing'));
+      return;
+    }
+    console.log('[Status] Token validation passed');
+
     const timeout = setTimeout(() => {
       reject(new Error('Bot startup timed out after 60 seconds'));
     }, 60000); // Increased timeout to 60 seconds
