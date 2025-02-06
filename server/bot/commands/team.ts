@@ -71,6 +71,7 @@ export const TeamCommands = [
           ['team-chat', ChannelType.GuildText],
           ['signing', ChannelType.GuildText],
           ['roster', ChannelType.GuildText],
+          ['stats-pictures', ChannelType.GuildText],
           ['team-voice', ChannelType.GuildVoice],
         ] as const;
 
@@ -80,32 +81,27 @@ export const TeamCommands = [
             name,
             type,
             parent: category.id,
+            ...(name === 'stats-pictures' ? {
+              rateLimitPerUser: 30,
+              nsfw: false,
+              permissionOverwrites: [
+                {
+                  id: interaction.guild!.roles.everyone.id,
+                  allow: [
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.AttachFiles,
+                    PermissionFlagsBits.EmbedLinks,
+                  ],
+                  deny: [
+                    PermissionFlagsBits.CreatePublicThreads,
+                    PermissionFlagsBits.CreatePrivateThreads,
+                  ]
+                }
+              ]
+            } : {})
           })
         ));
-
-        // Create media channel with specific settings
-        await interaction.guild.channels.create({
-          name: 'stats-pictures',
-          type: ChannelType.GuildMedia,
-          parent: category.id,
-          rateLimitPerUser: 30,
-          nsfw: false,
-          permissionOverwrites: [
-            {
-              id: interaction.guild.roles.everyone.id,
-              allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.AttachFiles,
-                PermissionFlagsBits.EmbedLinks,
-              ],
-              deny: [
-                PermissionFlagsBits.CreatePublicThreads,
-                PermissionFlagsBits.CreatePrivateThreads,
-              ]
-            }
-          ]
-        });
 
         // Create team role
         const role = await interaction.guild.roles.create({
