@@ -49,9 +49,16 @@ export class DiscordBot extends Client {
       },
       failIfNotExists: false,
       rest: {
-        retries: 5,
-        timeout: 60000
-      }
+        retries: 3, // Reduced from 5
+        timeout: 30000, // Reduced from 60000
+        api: 'https://discord.com/api',
+        cdn: 'https://cdn.discordapp.com',
+        version: '10',
+        rejectOnRateLimit: null,
+      },
+      shardCount: 1,
+      closeTimeout: 5000,
+      waitGuildTimeout: 15000,
     });
 
     this.commands = new Collection();
@@ -64,9 +71,9 @@ export class DiscordBot extends Client {
   }
 
   private calculateBackoff(): { delay: number; timeout: number } {
-    // Exponential backoff with jitter
-    const backoffFactor = Math.min(Math.pow(2, this.reconnectAttempt), 10);
-    const jitter = Math.random() * 1000;
+    // Reduced backoff for faster recovery
+    const backoffFactor = Math.min(Math.pow(1.5, this.reconnectAttempt), 5);
+    const jitter = Math.random() * 500;
     const delay = Math.min(
       this.INITIAL_RECONNECT_DELAY * backoffFactor + jitter,
       this.MAX_RECONNECT_DELAY
@@ -306,15 +313,16 @@ export class DiscordBot extends Client {
       }
 
       const ping = this.ws.ping;
-      if (ping > 300) { // Lowered high latency threshold
+      if (ping > 200) { // Further lowered threshold
         this.log(`High latency detected: ${ping}ms`, 'warn');
 
-        // Clear caches to reduce memory pressure
+        // Clear caches more aggressively
         this.channels.cache.clear();
         this.users.cache.clear();
+        this.guilds.cache.sweep(guild => !guild.available);
 
         // Force a clean reconnection if latency is too high
-        if (ping > 1000) { // Lowered reconnection threshold
+        if (ping > 500) { // Further lowered threshold
           this.log('Latency exceeded threshold, initiating clean reconnection', 'warn');
           this.destroy();
           this.handleDisconnect();
@@ -323,7 +331,7 @@ export class DiscordBot extends Client {
       }
 
       this.log(`Heartbeat OK - Latency: ${ping}ms`, 'debug');
-    }, 30000); // Check every 30 seconds
+    }, 20000); // More frequent checks
   }
 
   private startConnectionMonitor() {
@@ -651,8 +659,6 @@ client.once(Events.ClientReady, async (c) => {
     await registerCommands(client);
     console.log('[Status] All commands registered successfully!');
 
-    setInterval(checkExpiredContracts, 5 * 60 * 1000); // Every 5 minutes
-    setInterval(() => checkCapCompliance(client), 15 * 60 * 1000); // Every 15 minutes
   } catch (error) {
     console.error('[Error] Failed to register commands:', error);
   }
