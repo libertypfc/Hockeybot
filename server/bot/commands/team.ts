@@ -56,6 +56,8 @@ export const TeamCommands = [
           return interaction.editReply('This command can only be used in a server.');
         }
 
+        console.log('Creating team with name:', teamName, 'in guild:', guildId);
+
         // Check if team name already exists in this guild
         const existingTeam = await db.select({
           id: teams.id
@@ -123,6 +125,8 @@ export const TeamCommands = [
           mentionable: true,
         });
 
+        console.log('Saving team to database with guildId:', guildId);
+
         // Save team to database with guildId
         const [newTeam] = await db.insert(teams).values({
           name: teamName,
@@ -131,6 +135,8 @@ export const TeamCommands = [
           salaryCap: 82_500_000,
           availableCap: 82_500_000,
         }).returning();
+
+        console.log('Team saved to database:', newTeam);
 
         const embed = new EmbedBuilder()
           .setTitle('Team Created')
