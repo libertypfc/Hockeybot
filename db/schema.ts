@@ -2,6 +2,25 @@ import { pgTable, text, serial, integer, boolean, timestamp, unique, decimal } f
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { relations, sql } from "drizzle-orm";
 
+// Teams table without division_id
+export const teams = pgTable("teams", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  discord_category_id: text("discord_category_id").notNull(),
+  guild_id: text("guild_id").notNull(),
+  salary_cap: integer("salary_cap").default(82500000),
+  cap_floor: integer("cap_floor").default(3000000),
+  available_cap: integer("available_cap").default(82500000),
+  metadata: text("metadata"),
+});
+
+// Relations
+export const teamsRelations = relations(teams, ({ many }) => ({
+  players: many(players),
+  contracts: many(contracts),
+  teamStats: many(teamStats),
+}));
+
 // Add new tables for conferences and divisions
 export const conferences = pgTable("conferences", {
   id: serial("id").primaryKey(),
@@ -18,18 +37,6 @@ export const divisions = pgTable("divisions", {
   metadata: text("metadata"),
 });
 
-// Update teams table to include guildId for server isolation and make divisionId optional
-export const teams = pgTable("teams", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  discordCategoryId: text("discord_category_id").notNull(),
-  divisionId: integer("division_id").references(() => divisions.id),  // Made optional by removing .notNull()
-  guildId: text("guild_id").notNull(),
-  salaryCap: integer("salary_cap").default(82500000),
-  capFloor: integer("cap_floor").default(3000000),
-  availableCap: integer("available_cap").default(82500000),
-  metadata: text("metadata"),
-});
 
 export const teamStats = pgTable("team_stats", {
   id: serial("id").primaryKey(),
@@ -177,17 +184,6 @@ export const botUptimeAchievements = pgTable("bot_uptime_achievements", {
   metadata: text("metadata"), // Additional achievement-specific data
 });
 
-
-export const teamsRelations = relations(teams, ({ many, one }) => ({
-  players: many(players),
-  contracts: many(contracts),
-  teamStats: many(teamStats),
-  division: one(divisions, {
-    fields: [teams.divisionId],
-    references: [divisions.id],
-  }),
-}));
-
 export const teamStatsRelations = relations(teamStats, ({ one }) => ({
   team: one(teams, {
     fields: [teamStats.teamId],
@@ -274,12 +270,11 @@ export const conferencesRelations = relations(conferences, ({ many }) => ({
   divisions: many(divisions),
 }));
 
-export const divisionsRelations = relations(divisions, ({ one, many }) => ({
+export const divisionsRelations = relations(divisions, ({ one }) => ({
   conference: one(conferences, {
     fields: [divisions.conferenceId],
     references: [conferences.id],
   }),
-  teams: many(teams),
 }));
 
 export const insertTeamSchema = createInsertSchema(teams);

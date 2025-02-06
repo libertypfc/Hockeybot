@@ -1,44 +1,14 @@
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ComponentType, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-
-async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, playerId: number) {
-  try {
-    const player = await db.select({
-      discordId: players.discordId,
-    })
-    .from(players)
-    .where(eq(players.id, playerId))
-    .then(rows => rows[0]);
-
-    if (!player || !interaction.guild) return;
-
-    const member = await interaction.guild.members.fetch(player.discordId);
-    const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === "Free Agent");
-
-    if (!freeAgentRole) {
-      // Create Free Agent role if it doesn't exist
-      await interaction.guild.roles.create({
-        name: "Free Agent",
-        color: "#808080", // Gray color
-        reason: "Required for free agent players"
-      });
-    }
-
-    if (member && freeAgentRole) {
-      await member.roles.add(freeAgentRole);
-    }
-  } catch (error) {
-    console.error('Error assigning Free Agent role:', error);
-  }
-}
+import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder, ComponentType } from 'discord.js';
 
 export const TeamCommands = [
   {
     data: new SlashCommandBuilder()
       .setName('createteam')
-      .setDescription('Creates a new team with all required channels')
+      .setDescription('Creates a new team')
       .addStringOption(option =>
         option.setName('name')
           .setDescription('The name of the team')
@@ -56,13 +26,6 @@ export const TeamCommands = [
           return interaction.editReply('This command can only be used in a server.');
         }
 
-        console.log('Creating team with name:', teamName, 'in guild:', guildId);
-        console.log('Guild info:', {
-          guildId,
-          guildName: interaction.guild?.name,
-          botPermissions: interaction.guild?.members.me?.permissions.toArray()
-        });
-
         // Check if team name already exists in this guild
         const existingTeam = await db.select({
           id: teams.id
@@ -70,11 +33,9 @@ export const TeamCommands = [
         .from(teams)
         .where(and(
           eq(teams.name, teamName),
-          eq(teams.guildId, guildId)
+          eq(teams.guild_id, guildId)
         ))
         .then(rows => rows[0]);
-
-        console.log('Existing team check result:', existingTeam);
 
         if (existingTeam) {
           return interaction.editReply(`A team named "${teamName}" already exists in this server.`);
@@ -87,11 +48,8 @@ export const TeamCommands = [
         });
 
         if (!category || !interaction.guild) {
-          console.error('Failed to create category or guild is not available');
           return interaction.editReply('Failed to create team category');
         }
-
-        console.log('Created category:', category.id);
 
         // Create channels
         const channels = [
@@ -110,44 +68,25 @@ export const TeamCommands = [
           })
         ));
 
-        console.log('Created all channels for team');
-
         // Create team role
         const role = await interaction.guild.roles.create({
           name: teamName,
           mentionable: true,
         });
 
-        console.log('Created team role:', role.id);
-
-        try {
-          // Insert using the exact column names from the database schema
-          const [newTeam] = await db.insert(teams).values({
+        // Insert team into database with minimal required fields
+        const [newTeam] = await db.insert(teams)
+          .values({
             name: teamName,
             discord_category_id: category.id,
             guild_id: guildId,
             salary_cap: 82500000,
             available_cap: 82500000,
-          }).returning();
+          })
+          .returning();
 
-          console.log('Successfully saved team to database:', newTeam);
+        await interaction.editReply(`Team "${teamName}" has been created successfully!`);
 
-          const embed = new EmbedBuilder()
-            .setTitle('Team Created')
-            .setDescription(`Team "${teamName}" has been created successfully!`)
-            .addFields(
-              { name: 'Category', value: category.name },
-              { name: 'Role', value: role.name },
-              { name: 'Guild ID', value: guildId }
-            )
-            .setColor('#00FF00')
-            .setTimestamp();
-
-          await interaction.editReply({ embeds: [embed] });
-        } catch (dbError) {
-          console.error('Database error while saving team:', dbError);
-          throw dbError;
-        }
       } catch (error) {
         console.error('Error creating team:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -1019,3 +958,33 @@ export const TeamCommands = [
     },
   },
 ];
+
+async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, playerId: number) {
+  try {
+    const player = await db.select({
+      discordId: players.discordId,
+    })
+    .from(players)
+    .where(eq(players.id, playerId))
+    .then(rows => rows[0]);
+
+    if (!player || !interaction.guild) return;
+
+    const member = await interaction.guild.members.fetch(player.discordId);
+    const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === "Free Agent");
+
+    if (!freeAgentRole) {
+      // Create Free Agent role if it doesn't exist
+      await interaction.guild.roles.create({
+        name: "Free Agent",
+        color: "#808080", // Gray color
+        reason: "Required for free agent players"
+      });
+    }
+
+    if (member && freeAgentRole) {
+      await member.roles.add(freeAgentRole);
+    }
+  } catch (error) {
+    console.error('Error assigning Free Agent role:', error);  }
+}
