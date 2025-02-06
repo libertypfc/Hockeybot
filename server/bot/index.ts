@@ -308,16 +308,17 @@ export class DiscordBot extends Client {
       const ping = this.ws.ping;
       if (ping > 1000) { // High latency warning
         this.log(`High latency detected: ${ping}ms`, 'warn');
-      }
-
-      if (!this.isReady()) {
-        this.log('Client not ready during heartbeat check', 'error');
-        this.handleDisconnect();
-        return;
+        // Force a clean reconnection if latency is too high
+        if (ping > 5000) {
+          this.log('Latency exceeded threshold, initiating clean reconnection', 'warn');
+          this.destroy();
+          this.handleDisconnect();
+          return;
+        }
       }
 
       this.log(`Heartbeat OK - Latency: ${ping}ms`, 'debug');
-    }, 15000); // Check every 15 seconds
+    }, 30000); // Reduced frequency to 30 seconds
   }
 
   private startConnectionMonitor() {
@@ -329,13 +330,28 @@ export class DiscordBot extends Client {
         return;
       }
 
+      // Clean up any excess event listeners
+      this.removeAllListeners('disconnect');
+      this.removeAllListeners('resume');
+      this.on('disconnect', this.handleDisconnect.bind(this));
+      this.on('resume', this.handleResume.bind(this));
+
+      // Memory cleanup
+      if (global.gc) {
+        try {
+          global.gc();
+        } catch (error) {
+          this.log('Failed to run garbage collection', 'debug');
+        }
+      }
+
       // Check for signs of connection issues
       const guilds = this.guilds.cache.size;
       if (guilds === 0 && !this.isConnecting) {
         this.log('No guilds available, possible connection issue', 'warn');
         this.handleDisconnect();
       }
-    }, 30000); // Check every 30 seconds
+    }, 60000); // Reduced frequency to 60 seconds
   }
 
   private stopHeartbeat() {
@@ -444,8 +460,14 @@ export class DiscordBot extends Client {
 
   private handleDisconnect() {
     this.log('Disconnected from Discord', 'warn');
+
+    // Clear all intervals and timeouts
     this.stopHeartbeat();
     this.stopConnectionMonitor();
+
+    // Clear any pending operations
+    this.rest.clearTimeout();
+    this.ws?.destroy();
 
     if (!this.isConnecting) {
       this.attemptReconnect().catch(error => {
@@ -515,6 +537,34 @@ export class DiscordBot extends Client {
 
       this.isConnecting = false;
       throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
+    }
+  }
+
+  private async destroy() {
+    try {
+      // Clear all event listeners
+      this.removeAllListeners();
+
+      // Destroy the WebSocket connection
+      if (this.ws) {
+        this.ws.removeAllListeners();
+        this.ws.destroy();
+      }
+
+      // Clear the REST handler
+      this.rest.clearTimeout();
+
+      // Clear all caches
+      this.guilds.cache.clear();
+      this.channels.cache.clear();
+      this.users.cache.clear();
+
+      // Clear all intervals
+      this.stopHeartbeat();
+      this.stopConnectionMonitor();
+
+    } catch (error) {
+      this.log(`Error during cleanup: ${error}`, 'error');
     }
   }
 }
