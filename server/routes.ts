@@ -75,44 +75,34 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ error: 'Invalid team ID' });
       }
 
-      // Get team with players who are currently signed
-      const team = await db.select({
-        id: teams.id,
-        name: teams.name,
-        players: db.select()
-          .from(players)
-          .where(and(
-            eq(players.currentTeamId, teamId),
-            eq(players.status, 'signed')
-          ))
-      })
-      .from(teams)
-      .where(eq(teams.id, teamId))
-      .then(rows => rows[0]);
+      // Get all signed players for this team
+      const teamPlayers = await db.query.players.findMany({
+        where: and(
+          eq(players.currentTeamId, teamId),
+          eq(players.status, 'signed')
+        ),
+      });
 
-      if (!team) {
-        return res.status(404).json({ error: 'Team not found' });
+      if (!teamPlayers) {
+        console.log('No players found for team:', teamId);
+        return res.json([]);
       }
 
-      console.log('Team found:', team.name);
-      console.log('Players:', team.players);
+      console.log('Players found:', teamPlayers);
 
-      // Get active contracts for all players on the team
-      const activeContracts = await db.select({
-        playerId: contracts.playerId,
-        salary: contracts.salary
-      })
-      .from(contracts)
-      .where(and(
-        eq(contracts.teamId, teamId),
-        eq(contracts.status, 'active'),
-        gte(contracts.endDate, new Date())
-      ));
+      // Get active contracts for all players
+      const activeContracts = await db.query.contracts.findMany({
+        where: and(
+          eq(contracts.teamId, teamId),
+          eq(contracts.status, 'active'),
+          gte(contracts.endDate, new Date())
+        ),
+      });
 
       console.log('Active contracts found:', activeContracts);
 
       // Map players with their contract information
-      const roster = team.players.map(player => ({
+      const roster = teamPlayers.map(player => ({
         id: player.id,
         username: player.username,
         discordId: player.discordId,
