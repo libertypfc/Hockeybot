@@ -5,6 +5,7 @@ import { Button } from "./button";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { Skeleton } from "./skeleton";
 
 interface Player {
   id: number;
@@ -24,21 +25,22 @@ export function ExemptionManager() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: teams } = useQuery<Team[]>({
+  const { data: teams, isLoading: teamsLoading } = useQuery<Team[]>({
     queryKey: ['/api/teams'],
   });
 
-  const { data: roster } = useQuery<Player[]>({
-    queryKey: [`/api/teams/${selectedTeamId}/roster`],
-    enabled: !!selectedTeamId,
+  const { data: roster, isLoading: rosterLoading } = useQuery<Player[]>({
+    queryKey: ['/api/teams', selectedTeamId, 'roster'],
+    enabled: selectedTeamId !== "",
   });
 
   const toggleExemption = useMutation({
     mutationFn: async (playerId: number) => {
-      await apiRequest('POST', `/api/teams/${selectedTeamId}/exempt/${playerId}`);
+      if (!selectedTeamId) throw new Error("No team selected");
+      await apiRequest('POST', `/api/teams/${parseInt(selectedTeamId)}/exempt/${playerId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/teams/${selectedTeamId}/roster`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/teams', selectedTeamId, 'roster'] });
       queryClient.invalidateQueries({ queryKey: ['/api/teams'] });
       toast({
         title: "Success",
@@ -54,6 +56,10 @@ export function ExemptionManager() {
     },
   });
 
+  const handleTeamSelect = (value: string) => {
+    setSelectedTeamId(value);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -64,13 +70,15 @@ export function ExemptionManager() {
           <label className="text-sm font-medium">Select Team</label>
           <Select
             value={selectedTeamId}
-            onValueChange={setSelectedTeamId}
+            onValueChange={handleTeamSelect}
           >
             <SelectTrigger>
               <SelectValue placeholder="Select a team" />
             </SelectTrigger>
             <SelectContent>
-              {teams?.map((team) => (
+              {teamsLoading ? (
+                <SelectItem value="loading" disabled>Loading teams...</SelectItem>
+              ) : teams?.map((team) => (
                 <SelectItem key={team.id} value={team.id.toString()}>
                   {team.name}
                 </SelectItem>
@@ -79,31 +87,41 @@ export function ExemptionManager() {
           </Select>
         </div>
 
-        {selectedTeamId && roster && (
+        {selectedTeamId && (
           <div className="space-y-2">
             <label className="text-sm font-medium">Team Roster</label>
-            <div className="grid gap-2">
-              {roster.map((player) => (
-                <div
-                  key={player.id}
-                  className="flex items-center justify-between p-2 rounded border"
-                >
-                  <div>
-                    <span className="font-medium">{player.username}</span>
-                    <span className="ml-2 text-sm text-gray-500">
-                      ${player.salary.toLocaleString()}
-                    </span>
-                  </div>
-                  <Button
-                    variant={player.salaryExempt ? "destructive" : "secondary"}
-                    onClick={() => toggleExemption.mutate(player.id)}
-                    disabled={toggleExemption.isPending}
+            {rosterLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : roster && roster.length > 0 ? (
+              <div className="grid gap-2">
+                {roster.map((player) => (
+                  <div
+                    key={player.id}
+                    className="flex items-center justify-between p-2 rounded border"
                   >
-                    {player.salaryExempt ? "Remove Exemption" : "Make Exempt"}
-                  </Button>
-                </div>
-              ))}
-            </div>
+                    <div>
+                      <span className="font-medium">{player.username}</span>
+                      <span className="ml-2 text-sm text-gray-500">
+                        ${player.salary.toLocaleString()}
+                      </span>
+                    </div>
+                    <Button
+                      variant={player.salaryExempt ? "destructive" : "secondary"}
+                      onClick={() => toggleExemption.mutate(player.id)}
+                      disabled={toggleExemption.isPending}
+                    >
+                      {player.salaryExempt ? "Remove Exemption" : "Make Exempt"}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No players found in the roster.</p>
+            )}
           </div>
         )}
       </CardContent>
