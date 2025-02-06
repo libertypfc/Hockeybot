@@ -17,8 +17,9 @@ declare module 'discord.js' {
 export class DiscordBot extends Client {
   private isConnecting: boolean = false;
   private reconnectAttempt: number = 0;
-  private readonly MAX_RECONNECT_ATTEMPTS = 5; // Increased from 3
-  private readonly CONNECT_TIMEOUT = 30000;
+  private readonly MAX_RECONNECT_ATTEMPTS = 10; // Increased for more attempts
+  private readonly CONNECT_TIMEOUT = 60000; // Increased to 60 seconds
+  private readonly RECONNECT_DELAY = 5000; // 5 seconds between attempts
   private connectionState: string = 'disconnected';
 
   constructor() {
@@ -35,8 +36,8 @@ export class DiscordBot extends Client {
       ],
       failIfNotExists: false,
       rest: {
-        retries: 5, // Increased from 3
-        timeout: 30000 // Increased from 15000
+        retries: 5,
+        timeout: 60000
       }
     });
 
@@ -54,6 +55,12 @@ export class DiscordBot extends Client {
       this.connectionState = 'error';
       this.log('ERROR', `Discord client error: ${error.message}`);
       this.log('ERROR', error.stack || 'No stack trace available');
+
+      // Attempt to reconnect on error
+      if (!this.isConnecting) {
+        this.reconnectAttempt = 0;
+        this.start().catch(e => this.log('ERROR', `Reconnection failed: ${e}`));
+      }
     });
 
     this.on(Events.Debug, (message) => {
@@ -67,6 +74,7 @@ export class DiscordBot extends Client {
 
     this.once(Events.ClientReady, async (client) => {
       this.connectionState = 'ready';
+      this.reconnectAttempt = 0;
       this.log('INFO', `Logged in successfully as ${client.user.tag}`);
 
       try {
@@ -294,13 +302,19 @@ export class DiscordBot extends Client {
         throw new Error('DISCORD_TOKEN environment variable is not set');
       }
 
+      // Validate token format
+      const token = process.env.DISCORD_TOKEN;
+      if (!token.match(/^[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}$/)) {
+        throw new Error('Invalid Discord token format');
+      }
+
       this.log('INFO', 'Attempting to connect to Discord...');
       this.log('DEBUG', `Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
 
       try {
-        const loginPromise = this.login(process.env.DISCORD_TOKEN);
+        const loginPromise = this.login(token);
         const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Login timed out after 30 seconds')), this.CONNECT_TIMEOUT);
+          setTimeout(() => reject(new Error('Login timed out')), this.CONNECT_TIMEOUT);
         });
 
         await Promise.race([loginPromise, timeoutPromise]);
@@ -319,9 +333,8 @@ export class DiscordBot extends Client {
           });
         });
 
-        this.log('INFO', `Bot is fully ready and operational`);
+        this.log('INFO', 'Bot is fully ready and operational');
         this.isConnecting = false;
-        this.reconnectAttempt = 0;
         return true;
 
       } catch (error) {
@@ -332,7 +345,7 @@ export class DiscordBot extends Client {
           this.reconnectAttempt++;
           this.log('INFO', `Attempting to reconnect (${this.reconnectAttempt}/${this.MAX_RECONNECT_ATTEMPTS})...`);
           this.isConnecting = false;
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retry
+          await new Promise(resolve => setTimeout(resolve, this.RECONNECT_DELAY));
           return await this.start();
         } else {
           throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
@@ -354,8 +367,8 @@ export async function startBot(): Promise<DiscordBot> {
     console.log('[Status] Starting Discord bot...');
 
     const timeout = setTimeout(() => {
-      reject(new Error('Bot startup timed out after 30 seconds'));
-    }, 30000);
+      reject(new Error('Bot startup timed out after 60 seconds'));
+    }, 60000); // Increased timeout to 60 seconds
 
     client.start()
       .then(() => {
