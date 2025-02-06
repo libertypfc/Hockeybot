@@ -76,36 +76,40 @@ export function registerRoutes(app: Express): Server {
       }
 
       // Get team with players who are currently signed
-      const team = await db.query.teams.findFirst({
-        where: eq(teams.id, teamId),
-        with: {
-          players: {
-            where: and(
-              eq(players.currentTeamId, teamId),
-              eq(players.status, 'signed')
-            ),
-          },
-        },
-      });
+      const team = await db.select({
+        id: teams.id,
+        name: teams.name,
+        players: db.select()
+          .from(players)
+          .where(and(
+            eq(players.currentTeamId, teamId),
+            eq(players.status, 'signed')
+          ))
+      })
+      .from(teams)
+      .where(eq(teams.id, teamId))
+      .then(rows => rows[0]);
 
       if (!team) {
         return res.status(404).json({ error: 'Team not found' });
       }
 
       console.log('Team found:', team.name);
-      console.log('Players count:', team.players.length);
-      console.log('Raw players data:', team.players);
+      console.log('Players:', team.players);
 
       // Get active contracts for all players on the team
-      const activeContracts = await db.query.contracts.findMany({
-        where: and(
-          eq(contracts.teamId, teamId),
-          eq(contracts.status, 'active'),
-          gte(contracts.endDate, new Date())
-        ),
-      });
+      const activeContracts = await db.select({
+        playerId: contracts.playerId,
+        salary: contracts.salary
+      })
+      .from(contracts)
+      .where(and(
+        eq(contracts.teamId, teamId),
+        eq(contracts.status, 'active'),
+        gte(contracts.endDate, new Date())
+      ));
 
-      console.log('Active contracts found:', activeContracts.length);
+      console.log('Active contracts found:', activeContracts);
 
       // Map players with their contract information
       const roster = team.players.map(player => ({
