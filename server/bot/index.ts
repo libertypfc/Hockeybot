@@ -344,7 +344,7 @@ class DiscordBot extends Client {
 
 export const client = new DiscordBot();
 
-export function startBot(): Promise<void> {
+export async function startBot(): Promise<DiscordBot> {
   return new Promise((resolve, reject) => {
     console.log('[Status] Starting Discord bot...');
 
@@ -357,7 +357,7 @@ export function startBot(): Promise<void> {
         clearTimeout(timeout);
         if (client.isReady()) {
           console.log('[Status] Bot is ready and connected!');
-          resolve();
+          resolve(client);
         } else {
           reject(new Error('Bot failed to become ready after login'));
         }

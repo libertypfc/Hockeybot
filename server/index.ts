@@ -83,12 +83,15 @@ async function startApplication() {
     setTimeout(async () => {
       try {
         const discordClient = await startBot();
-        if (discordClient) {
-          log('Discord bot started successfully', 'startup');
+        if (discordClient && discordClient.isReady()) {
+          log('Discord bot started successfully and is online', 'startup');
+        } else {
+          log('Discord bot started but is not ready - check connection', 'startup');
         }
       } catch (error) {
         log(`Error starting Discord bot: ${error}`, 'startup');
         // Don't throw error here, let the bot's internal reconnection handle it
+        console.error('Discord bot startup error:', error);
       }
     }, 5000); // 5 second delay before starting bot
 
