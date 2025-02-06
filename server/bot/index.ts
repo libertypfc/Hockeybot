@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChannel, DMChannel, ChannelType, SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams, guildSettings } from '@db/schema';
-import { eq, and, lt } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { registerCommands } from './commands';
 import { checkCapCompliance } from './commands/admin';
 
@@ -27,7 +27,6 @@ class ReliableDiscordClient extends Client {
   private maxReconnectAttempts: number = 20;
   private baseDelay: number = 1000;
   private heartbeatInterval?: NodeJS.Timeout;
-  private watchdogInterval?: NodeJS.Timeout;
   private connectionCheckInterval?: NodeJS.Timeout;
   private stateCheckInterval?: NodeJS.Timeout;
   private isShuttingDown: boolean = false;
@@ -36,7 +35,6 @@ class ReliableDiscordClient extends Client {
   private connectionState: ConnectionState = ConnectionState.DISCONNECTED;
   private lastError?: Error;
   private processStartTime: number = Date.now();
-  private wsCloseTimeout?: NodeJS.Timeout;
 
   constructor() {
     super({
@@ -73,30 +71,7 @@ class ReliableDiscordClient extends Client {
       this.lastHeartbeat = Date.now();
       this.reconnectAttempts = 0;
       this.startAllMonitors();
-    });
-
-    // Handle WebSocket events directly
-    this.ws?.on('error', (error: Error) => {
-      console.error('[WebSocket] Error:', error);
-      client.destroy().then(() => {
-        console.log('[WebSocket] Client destroyed, preparing reconnect');
-        client.login(process.env.DISCORD_TOKEN);
-      }).catch(err => {
-        console.error('[WebSocket] Error during client cleanup:', err);
-      });
-    });
-
-    this.ws?.on('close', (code: number) => {
-      console.log(`[WebSocket] Gateway connection closed with code ${code}`);
-
-      if (code !== 1000) { // Not a normal closure
-        client.destroy().then(() => {
-          console.log('[WebSocket] Client destroyed, preparing reconnect');
-          client.login(process.env.DISCORD_TOKEN);
-        }).catch(err => {
-          console.error('[WebSocket] Error during client cleanup:', err);
-        });
-      }
+      this.log('Status', `Bot is ready as ${this.user?.tag}`);
     });
   }
 
@@ -127,11 +102,9 @@ class ReliableDiscordClient extends Client {
   private clearAllIntervals() {
     [
       this.heartbeatInterval,
-      this.watchdogInterval,
       this.connectionCheckInterval,
       this.stateCheckInterval,
       this.forcedReconnectTimeout,
-      this.wsCloseTimeout
     ].forEach(interval => {
       if (interval) clearInterval(interval);
     });
@@ -154,7 +127,6 @@ class ReliableDiscordClient extends Client {
   private startConnectionCheck() {
     if (this.connectionCheckInterval) clearInterval(this.connectionCheckInterval);
 
-    // Check connection state every 30 seconds instead of 3
     this.connectionCheckInterval = setInterval(() => {
       if (!this.isReady() && this.connectionState !== ConnectionState.RECONNECTING) {
         this.log('Connection', 'Bot is not ready, initiating reconnection...');
@@ -165,30 +137,18 @@ class ReliableDiscordClient extends Client {
 
   private startHeartbeat() {
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-    if (this.watchdogInterval) clearInterval(this.watchdogInterval);
 
-    // Use a longer interval for heartbeat checks (30 seconds)
     this.heartbeatInterval = setInterval(() => {
       if (this.isReady()) {
         this.lastHeartbeat = Date.now();
-        this.log('Heartbeat', 'Connection alive');
+        this.log('Heartbeat', `Connection alive (Ping: ${this.ws?.ping}ms)`);
       } else {
         this.log('Heartbeat', 'Check failed, connection may be dead');
         if (this.connectionState !== ConnectionState.RECONNECTING) {
           this.attemptReconnect(true);
         }
       }
-    }, 30000); // Heartbeat every 30 seconds
-
-    // Watchdog checks every minute instead of 3 seconds
-    this.watchdogInterval = setInterval(() => {
-      const timeSinceLastHeartbeat = Date.now() - this.lastHeartbeat;
-      if (timeSinceLastHeartbeat > 90000 && // 90 seconds threshold
-        this.connectionState !== ConnectionState.RECONNECTING) {
-        this.log('Watchdog', 'Detected stale connection, forcing reconnect...');
-        this.attemptReconnect(true);
-      }
-    }, 60000); // Check every minute
+    }, 30000);
   }
 
   private async handleUncaughtError(error: Error) {
@@ -234,12 +194,9 @@ class ReliableDiscordClient extends Client {
       process.exit(1);
     }
 
-    // Add exponential backoff with jitter
-    const baseDelay = force ? 0 : this.baseDelay;
-    const jitter = Math.random() * 1000;
     const delay = force ? 0 : Math.min(
-      baseDelay * Math.pow(1.5, this.reconnectAttempts) + jitter,
-      300000 // Max 5 minutes
+      this.baseDelay * Math.pow(1.5, this.reconnectAttempts) + Math.random() * 1000,
+      300000
     );
 
     this.log('Recovery', `Attempting to reconnect in ${delay}ms (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
@@ -251,7 +208,6 @@ class ReliableDiscordClient extends Client {
         await this.destroy();
       }
 
-      // Wait a bit before trying to reconnect
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       await this.login(process.env.DISCORD_TOKEN);
@@ -262,7 +218,6 @@ class ReliableDiscordClient extends Client {
         this.reconnectAttempts = 0;
       }
 
-      // Schedule a forced reconnect after 6 hours instead of 2
       if (this.forcedReconnectTimeout) {
         clearTimeout(this.forcedReconnectTimeout);
       }
@@ -277,7 +232,6 @@ class ReliableDiscordClient extends Client {
       this.reconnectAttempts++;
       this.setConnectionState(ConnectionState.ERROR);
 
-      // Add delay before next reconnection attempt
       await new Promise(resolve => setTimeout(resolve, 5000));
       await this.attemptReconnect();
     }
@@ -301,12 +255,34 @@ class ReliableDiscordClient extends Client {
   }
 
   async start() {
+    this.log('Startup', 'Starting bot...');
+
+    if (!process.env.DISCORD_TOKEN) {
+      throw new Error('DISCORD_TOKEN environment variable is not set');
+    }
+
     try {
+      this.setConnectionState(ConnectionState.CONNECTING);
+
+      // Clear any existing intervals
+      this.clearAllIntervals();
+
+      // Attempt to login
       await this.login(process.env.DISCORD_TOKEN);
+
+      // Start monitoring after successful login
       this.startAllMonitors();
       this.log('Startup', 'Bot successfully started and connected!');
 
-      // Schedule first forced reconnect after 6 hours instead of 2
+      // Register commands after successful connection
+      try {
+        await registerCommands(this);
+        this.log('Startup', 'Commands registered successfully');
+      } catch (error) {
+        this.log('Error', 'Failed to register commands', error as Error);
+      }
+
+      // Schedule periodic reconnection
       this.forcedReconnectTimeout = setTimeout(() => {
         this.attemptReconnect(true);
       }, 6 * 60 * 60 * 1000);
@@ -314,6 +290,7 @@ class ReliableDiscordClient extends Client {
     } catch (error) {
       this.log('Startup', 'Failed to start the bot', error as Error);
       await this.attemptReconnect(true);
+      throw error;
     }
   }
 }
@@ -567,7 +544,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         .setDescription(`❌ Contract declined by ${user}`);
       await message.edit({ embeds: [updatedEmbed] });
     }
-
   } catch (error) {
     console.error('[Error] Error processing contract reaction:', error);
   }
@@ -596,17 +572,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 export function startBot(): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Add delay before starting to ensure server is ready
-    setTimeout(() => {
-      client.start()
-        .then(() => {
-          console.log('[Status] Bot started successfully');
-          resolve();
-        })
-        .catch((error) => {
-          console.error('[Error] Critical error starting bot:', error);
-          reject(error);
-        });
-    }, 2000); // 2 second delay
+    console.log('[Status] Starting Discord bot...');
+
+    // Set a timeout to prevent hanging
+    const startTimeout = setTimeout(() => {
+      reject(new Error('Bot startup timed out after 30 seconds'));
+    }, 30000);
+
+    // Check if bot is ready
+    const checkReady = () => {
+      if (client.isReady()) {
+        clearTimeout(startTimeout);
+        console.log('[Status] Bot is ready and connected!');
+        resolve();
+      } else {
+        console.log('[Status] Waiting for bot to be ready...');
+        setTimeout(checkReady, 1000);
+      }
+    };
+
+    // Start the bot
+    client.start()
+      .then(() => {
+        checkReady();
+      })
+      .catch((error) => {
+        clearTimeout(startTimeout);
+        console.error('[Error] Failed to start bot:', error);
+        reject(error);
+      });
   });
 }

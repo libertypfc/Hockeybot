@@ -35,11 +35,11 @@ async function testBot() {
   }
 }
 
-// Export the test function for use in other modules
+// Export the test function
 export { testBot };
 
-// Run the test if this file is executed directly
-if (require.main === module) {
+// Run the test if this file is imported directly
+if (import.meta.url === import.meta.resolve('./test.ts')) {
   testBot().then(success => {
     if (!success) {
       process.exit(1);
