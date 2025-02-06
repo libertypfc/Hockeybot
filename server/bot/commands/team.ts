@@ -57,6 +57,11 @@ export const TeamCommands = [
         }
 
         console.log('Creating team with name:', teamName, 'in guild:', guildId);
+        console.log('Guild info:', {
+          guildId,
+          guildName: interaction.guild?.name,
+          botPermissions: interaction.guild?.members.me?.permissions.toArray()
+        });
 
         // Check if team name already exists in this guild
         const existingTeam = await db.select({
@@ -69,6 +74,8 @@ export const TeamCommands = [
         ))
         .then(rows => rows[0]);
 
+        console.log('Existing team check result:', existingTeam);
+
         if (existingTeam) {
           return interaction.editReply(`A team named "${teamName}" already exists in this server.`);
         }
@@ -80,8 +87,11 @@ export const TeamCommands = [
         });
 
         if (!category || !interaction.guild) {
+          console.error('Failed to create category or guild is not available');
           return interaction.editReply('Failed to create team category');
         }
+
+        console.log('Created category:', category.id);
 
         // Create channels
         const channels = [
@@ -119,37 +129,52 @@ export const TeamCommands = [
           })
         ));
 
+        console.log('Created all channels for team');
+
         // Create team role
         const role = await interaction.guild.roles.create({
           name: teamName,
           mentionable: true,
         });
 
-        console.log('Saving team to database with guildId:', guildId);
+        console.log('Created team role:', role.id);
 
-        // Save team to database with guildId
-        const [newTeam] = await db.insert(teams).values({
-          name: teamName,
-          discordCategoryId: category.id,
-          guildId: guildId,
-          salaryCap: 82_500_000,
-          availableCap: 82_500_000,
-        }).returning();
+        try {
+          console.log('Attempting to save team to database with data:', {
+            name: teamName,
+            discordCategoryId: category.id,
+            guildId: guildId,
+            salaryCap: 82_500_000,
+            availableCap: 82_500_000,
+          });
 
-        console.log('Team saved to database:', newTeam);
+          // Save team to database with guildId
+          const [newTeam] = await db.insert(teams).values({
+            name: teamName,
+            discordCategoryId: category.id,
+            guildId: guildId,
+            salaryCap: 82_500_000,
+            availableCap: 82_500_000,
+          }).returning();
 
-        const embed = new EmbedBuilder()
-          .setTitle('Team Created')
-          .setDescription(`Team "${teamName}" has been created successfully!`)
-          .addFields(
-            { name: 'Category', value: category.name },
-            { name: 'Role', value: role.name },
-            { name: 'Guild ID', value: guildId }
-          )
-          .setColor('#00FF00')
-          .setTimestamp();
+          console.log('Successfully saved team to database:', newTeam);
 
-        await interaction.editReply({ embeds: [embed] });
+          const embed = new EmbedBuilder()
+            .setTitle('Team Created')
+            .setDescription(`Team "${teamName}" has been created successfully!`)
+            .addFields(
+              { name: 'Category', value: category.name },
+              { name: 'Role', value: role.name },
+              { name: 'Guild ID', value: guildId }
+            )
+            .setColor('#00FF00')
+            .setTimestamp();
+
+          await interaction.editReply({ embeds: [embed] });
+        } catch (dbError) {
+          console.error('Database error while saving team:', dbError);
+          throw dbError;
+        }
       } catch (error) {
         console.error('Error creating team:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -960,7 +985,7 @@ export const TeamCommands = [
         await interaction.editReply(`Failed to set salary cap: ${errorMessage}`);
       }
     },
-  },
+    },
   {
     data: new SlashCommandBuilder()
       .setName('setfloor')
