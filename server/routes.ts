@@ -5,6 +5,7 @@ import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 import { Client, GatewayIntentBits } from 'discord.js';
+import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ComponentType, EmbedBuilder } from 'discord.js';
 
 let discordClient: Client | null = null;
 
@@ -45,6 +46,8 @@ export function registerRoutes(app: Express): Server {
         return res.status(400).json({ error: 'Guild ID is required' });
       }
 
+      console.log('Fetching teams for guild:', guildId);
+
       // Get teams for specific guild
       const allTeams = await db.select({
         id: teams.id,
@@ -55,6 +58,8 @@ export function registerRoutes(app: Express): Server {
       })
       .from(teams)
       .where(eq(teams.guildId, guildId as string));
+
+      console.log('Found teams:', allTeams);
 
       // Get players and contracts for each team
       const teamsWithStats = await Promise.all(allTeams.map(async team => {
@@ -68,6 +73,8 @@ export function registerRoutes(app: Express): Server {
         .from(players)
         .where(eq(players.currentTeamId, team.id));
 
+        console.log(`Players for team ${team.name}:`, teamPlayers);
+
         // Get active contracts for this team
         const teamContracts = await db.select({
           playerId: contracts.playerId,
@@ -79,6 +86,8 @@ export function registerRoutes(app: Express): Server {
           eq(contracts.status, 'active'),
           gte(contracts.endDate, new Date())
         ));
+
+        console.log(`Contracts for team ${team.name}:`, teamContracts);
 
         const totalSalary = teamContracts.reduce((sum, contract) => {
           const player = teamPlayers.find(p => p.id === contract.playerId);
@@ -103,6 +112,7 @@ export function registerRoutes(app: Express): Server {
         };
       }));
 
+      console.log('Final response:', teamsWithStats);
       res.json(teamsWithStats);
     } catch (error) {
       console.error('Error fetching teams:', error);
