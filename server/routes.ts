@@ -6,14 +6,23 @@ import { teams, players, contracts, teamStats, playerStats, seasons, gameSchedul
 import { eq, and, gte, lte, sql } from 'drizzle-orm';
 import { Client, GatewayIntentBits } from 'discord.js';
 
+let discordClient: Client | null = null;
+
+async function getDiscordClient() {
+  if (!discordClient) {
+    discordClient = new Client({ intents: [GatewayIntentBits.Guilds] });
+    await discordClient.login(process.env.DISCORD_TOKEN);
+  }
+  return discordClient;
+}
+
 export function registerRoutes(app: Express): Server {
   const port = process.env.PORT || 3000;
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
-      await client.login(process.env.DISCORD_TOKEN);
+      const client = await getDiscordClient();
       const guilds = await client.guilds.fetch();
 
       const servers = Array.from(guilds.values()).map(guild => ({
@@ -114,8 +123,6 @@ export function registerRoutes(app: Express): Server {
         return res.json([]);
       }
 
-      console.log('Players found:', teamPlayers);
-
       // Get active contracts for all players
       const activeContracts = await db.query.contracts.findMany({
         where: and(
@@ -125,7 +132,6 @@ export function registerRoutes(app: Express): Server {
         ),
       });
 
-      console.log('Active contracts found:', activeContracts);
 
       // Map players with their contract information
       const roster = teamPlayers.map(player => ({
@@ -136,7 +142,6 @@ export function registerRoutes(app: Express): Server {
         salary: activeContracts.find(c => c.playerId === player.id)?.salary || 0,
       }));
 
-      console.log('Final roster data:', roster);
       res.json(roster);
     } catch (error) {
       console.error('Error fetching team roster:', error);
@@ -147,15 +152,14 @@ export function registerRoutes(app: Express): Server {
   // Create HTTP server with consistent port
   const httpServer = createServer(app);
 
-  httpServer.listen(port, '0.0.0.0', async () => {
+  httpServer.listen(port, () => {
     console.log(`Server is running on port ${port}`);
-    try {
-      await startBot();
+    startBot().then(() => {
       console.log('Bot started successfully after server initialization');
-    } catch (error) {
+    }).catch(error => {
       console.error('Failed to start bot:', error);
       console.error('Bot startup failed but server will continue running');
-    }
+    });
   });
 
   return httpServer;
