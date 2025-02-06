@@ -302,10 +302,10 @@ export class DiscordBot extends Client {
         throw new Error('DISCORD_TOKEN environment variable is not set');
       }
 
-      // Validate token format
-      const token = process.env.DISCORD_TOKEN;
-      if (!token.match(/^[MN][A-Za-z\d]{23}\.[\w-]{6}\.[\w-]{27}$/)) {
-        throw new Error('Invalid Discord token format');
+      // Modified token validation to be less restrictive
+      const token = process.env.DISCORD_TOKEN.trim();
+      if (!token || token.length < 50) {  // Basic length check instead of strict regex
+        throw new Error('Discord token appears to be invalid (too short)');
       }
 
       this.log('INFO', 'Attempting to connect to Discord...');
@@ -317,16 +317,19 @@ export class DiscordBot extends Client {
           setTimeout(() => reject(new Error('Login timed out')), this.CONNECT_TIMEOUT);
         });
 
+        this.log('DEBUG', 'Attempting login...');
         await Promise.race([loginPromise, timeoutPromise]);
         this.log('INFO', 'Login successful, waiting for ready event...');
 
         await new Promise<void>((resolve, reject) => {
           const timeout = setTimeout(() => {
             this.connectionState = 'timeout';
+            this.log('ERROR', 'Timed out waiting for ready event');
             reject(new Error('Timed out waiting for ready event'));
           }, this.CONNECT_TIMEOUT);
 
           this.once(Events.ClientReady, () => {
+            this.log('DEBUG', 'Received ready event');
             clearTimeout(timeout);
             this.log('INFO', 'Ready event received');
             resolve();
