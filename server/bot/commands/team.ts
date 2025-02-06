@@ -121,21 +121,13 @@ export const TeamCommands = [
         console.log('Created team role:', role.id);
 
         try {
-          console.log('Attempting to save team to database with data:', {
-            name: teamName,
-            discordCategoryId: category.id,
-            guildId: guildId,
-            salaryCap: 82_500_000,
-            availableCap: 82_500_000,
-          });
-
-          // Save team to database with only the required fields
+          // Insert using the exact column names from the database schema
           const [newTeam] = await db.insert(teams).values({
             name: teamName,
             discord_category_id: category.id,
             guild_id: guildId,
-            salary_cap: 82_500_000,
-            available_cap: 82_500_000,
+            salary_cap: 82500000,
+            available_cap: 82500000,
           }).returning();
 
           console.log('Successfully saved team to database:', newTeam);
