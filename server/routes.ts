@@ -24,7 +24,6 @@ export function registerRoutes(app: Express): Server {
       });
 
       const teamsWithStats = await Promise.all(allTeams.map(async team => {
-        // Get current active contracts only for players currently on this team
         const currentTeamContracts = await db.query.contracts.findMany({
           where: and(
             eq(contracts.status, 'active'),
@@ -36,26 +35,18 @@ export function registerRoutes(app: Express): Server {
           ),
         });
 
-        // Calculate total salary only from active contracts of current players
         const totalSalary = currentTeamContracts.reduce((sum, contract) => {
-          console.log(`Contract for team ${team.name}: ${contract.salary} (Status: ${contract.status}, End Date: ${contract.endDate})`);
           return sum + contract.salary;
         }, 0);
 
         const availableCap = (team.salaryCap || 82500000) - totalSalary;
 
-        // Get exempt players
         const exemptPlayers = team.players
           .filter(player => player.salaryExempt)
           .map(player => ({
             username: player.username,
             discordId: player.discordId
           }));
-
-        console.log(`Team ${team.name} summary:`);
-        console.log(`- Total Salary: ${totalSalary}`);
-        console.log(`- Available Cap: ${availableCap}`);
-        console.log(`- Exempt Players: ${exemptPlayers.length}`);
 
         return {
           id: team.id,
@@ -72,6 +63,54 @@ export function registerRoutes(app: Express): Server {
     } catch (error) {
       console.error('Error fetching teams:', error);
       res.status(500).json({ error: 'Failed to fetch teams' });
+    }
+  });
+
+  // Get team roster with salary information
+  app.get('/api/teams/:teamId/roster', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId);
+
+      if (isNaN(teamId)) {
+        return res.status(400).json({ error: 'Invalid team ID' });
+      }
+
+      const team = await db.query.teams.findFirst({
+        where: eq(teams.id, teamId),
+        with: {
+          players: true,
+        },
+      });
+
+      if (!team) {
+        return res.status(404).json({ error: 'Team not found' });
+      }
+
+      // Get active contracts for all players on the team
+      const activeContracts = await db.query.contracts.findMany({
+        where: and(
+          eq(contracts.teamId, teamId),
+          eq(contracts.status, 'active'),
+          gte(contracts.endDate, new Date())
+        ),
+      });
+
+      // Map players with their contract information
+      const roster = team.players.map(player => {
+        const contract = activeContracts.find(c => c.playerId === player.id);
+        return {
+          id: player.id,
+          username: player.username,
+          discordId: player.discordId,
+          salaryExempt: player.salaryExempt,
+          salary: contract?.salary || 0,
+        };
+      });
+
+      res.json(roster);
+    } catch (error) {
+      console.error('Error fetching team roster:', error);
+      res.status(500).json({ error: 'Failed to fetch team roster' });
     }
   });
 

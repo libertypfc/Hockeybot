@@ -29,7 +29,7 @@ export function ExemptionManager() {
     queryKey: ['/api/teams'],
   });
 
-  const { data: roster, isLoading: rosterLoading } = useQuery<Player[]>({
+  const { data: roster, isLoading: rosterLoading, error: rosterError } = useQuery<Player[]>({
     queryKey: ['/api/teams', selectedTeamId, 'roster'],
     enabled: selectedTeamId !== "",
   });
@@ -59,6 +59,14 @@ export function ExemptionManager() {
   const handleTeamSelect = (value: string) => {
     setSelectedTeamId(value);
   };
+
+  if (rosterError) {
+    toast({
+      title: "Error",
+      description: "Failed to load team roster. Please try again.",
+      variant: "destructive",
+    });
+  }
 
   return (
     <Card>
@@ -106,7 +114,7 @@ export function ExemptionManager() {
                     <div>
                       <span className="font-medium">{player.username}</span>
                       <span className="ml-2 text-sm text-gray-500">
-                        ${player.salary.toLocaleString()}
+                        ${(player.salary || 0).toLocaleString()}
                       </span>
                     </div>
                     <Button
