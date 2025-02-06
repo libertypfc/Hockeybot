@@ -20,13 +20,19 @@ interface Team {
   name: string;
 }
 
-export function ExemptionManager() {
+interface ExemptionManagerProps {
+  serverId: string;
+}
+
+export function ExemptionManager({ serverId }: ExemptionManagerProps) {
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const { data: teams, isLoading: teamsLoading } = useQuery<Team[]>({
-    queryKey: ['/api/teams'],
+    queryKey: ['/api/teams', serverId],
+    queryFn: () => fetch(`/api/teams?guildId=${serverId}`).then(res => res.json()),
+    enabled: !!serverId,
   });
 
   const { data: roster, isLoading: rosterLoading, error: rosterError } = useQuery<Player[]>({
@@ -41,7 +47,7 @@ export function ExemptionManager() {
       console.log('Roster data received:', data);
       return data;
     },
-    enabled: selectedTeamId !== "",
+    enabled: !!selectedTeamId,
   });
 
   const toggleExemption = useMutation({
@@ -51,7 +57,7 @@ export function ExemptionManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/teams', selectedTeamId, 'roster'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/teams'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/teams', serverId] });
       toast({
         title: "Success",
         description: "Player exemption status updated.",
