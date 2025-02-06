@@ -306,10 +306,15 @@ export class DiscordBot extends Client {
       }
 
       const ping = this.ws.ping;
-      if (ping > 1000) { // High latency warning
+      if (ping > 300) { // Lowered high latency threshold
         this.log(`High latency detected: ${ping}ms`, 'warn');
+
+        // Clear caches to reduce memory pressure
+        this.channels.cache.clear();
+        this.users.cache.clear();
+
         // Force a clean reconnection if latency is too high
-        if (ping > 5000) {
+        if (ping > 1000) { // Lowered reconnection threshold
           this.log('Latency exceeded threshold, initiating clean reconnection', 'warn');
           this.destroy();
           this.handleDisconnect();
@@ -318,7 +323,7 @@ export class DiscordBot extends Client {
       }
 
       this.log(`Heartbeat OK - Latency: ${ping}ms`, 'debug');
-    }, 30000); // Reduced frequency to 30 seconds
+    }, 30000); // Check every 30 seconds
   }
 
   private startConnectionMonitor() {
