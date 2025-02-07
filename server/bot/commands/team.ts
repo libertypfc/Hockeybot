@@ -401,6 +401,74 @@ export const TeamCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('changeteamname')
+      .setDescription('Change a team\'s name')
+      .addRoleOption(option =>
+        option.setName('team')
+          .setDescription('The team to rename (use @team)')
+          .setRequired(true))
+      .addStringOption(option =>
+        option.setName('newname')
+          .setDescription('The new name for the team')
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const teamRole = interaction.options.getRole('team', true);
+        const newName = interaction.options.getString('newname', true);
+        const guildId = interaction.guildId;
+
+        if (!guildId) {
+          return interaction.editReply('This command must be run in a guild.');
+        }
+
+        // Find team in database
+        const [team] = await db.select()
+          .from(teams)
+          .where(
+            and(
+              eq(teams.name, teamRole.name),
+              eq(teams.guild_id, guildId)
+            )
+          );
+
+        if (!team) {
+          return interaction.editReply('Team not found in database for this guild');
+        }
+
+        // Update team name in database
+        await db.update(teams)
+          .set({ name: newName })
+          .where(eq(teams.id, team.id));
+
+        // Update Discord role name
+        try {
+          await teamRole.setName(newName, 'Team name change command');
+        } catch (error) {
+          console.error('Error updating role name:', error);
+          return interaction.editReply('Failed to update Discord role name. Please check bot permissions.');
+        }
+
+        const embed = new EmbedBuilder()
+          .setTitle('Team Name Updated')
+          .setDescription(`Team name has been changed from ${team.name} to ${newName}`)
+          .setColor('#00FF00')
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error('Error changing team name:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to change team name: ${errorMessage}`);
+      }
+    },
+  },
 ];
 
 // Helper function for assigning free agent role
