@@ -485,22 +485,31 @@ export const TeamCommands = [
         }
 
         // Find player in database
-        const player = await db.query.players.findFirst({
-          where: eq(players.discord_id, user.id),
-        });
+        const player = await db.select({
+          id: players.id,
+          username: players.username,
+          currentTeamId: players.currentTeamId
+        })
+          .from(players)
+          .where(eq(players.discordId, user.id))
+          .then(rows => rows[0]);
 
         if (!player) {
           return interaction.editReply('Player not found in the database.');
         }
 
-        if (!player.current_team_id) {
+        if (!player.currentTeamId) {
           return interaction.editReply('This player is not currently on a team.');
         }
 
         // Get current team info for the message
-        const team = await db.query.teams.findFirst({
-          where: eq(teams.id, player.current_team_id),
-        });
+        const team = await db.select({
+          id: teams.id,
+          name: teams.name
+        })
+          .from(teams)
+          .where(eq(teams.id, player.currentTeamId))
+          .then(rows => rows[0]);
 
         // Update player status to free agent and remove team
         await db.update(players)
@@ -516,7 +525,7 @@ export const TeamCommands = [
             status: 'terminated',
             endDate: new Date()
           })
-          .where(and(eq(contracts.player_id, player.id), eq(contracts.status, 'active')));
+          .where(and(eq(contracts.playerId, player.id), eq(contracts.status, 'active')));
 
         // Update Discord roles if possible
         if (interaction.guild) {
