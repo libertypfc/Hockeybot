@@ -12,33 +12,33 @@ export const TeamCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
     async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
       try {
         // Get all teams from database for the current guild
         const allTeams = await db.select()
           .from(teams)
-          .where(eq(teams.guild_id, interaction.guildId));
+          .where(eq(teams.guild_id, interaction.guildId!));
 
         if (allTeams.length === 0) {
-          return interaction.reply('No teams found in the database for this guild.');
+          return interaction.editReply('No teams found in the database for this guild.');
         }
 
         // Create select menu for teams
         const teamSelect = new StringSelectMenuBuilder()
           .setCustomId('team-select')
           .setPlaceholder('Select a team to delete')
-          .addOptions(
-            allTeams.map(team =>
-              new StringSelectMenuOptionBuilder()
-                .setLabel(team.name)
-                .setValue(team.id.toString())
-                .setDescription(`Delete ${team.name} and all associated data`)
-            )
-          );
+          .addOptions(allTeams.map(team =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(team.name)
+              .setValue(team.id.toString())
+              .setDescription(`Delete ${team.name} and all associated data`)
+          ));
 
         const row = new ActionRowBuilder<StringSelectMenuBuilder>()
           .addComponents(teamSelect);
 
-        const response = await interaction.reply({
+        const response = await interaction.editReply({
           content: 'Please select the team you want to delete:',
           components: [row],
         });
@@ -63,9 +63,7 @@ export const TeamCommands = [
           let errors: string[] = [];
 
           // Get all players before updating
-          const teamPlayers = await db.select({
-            id: players.id,
-          })
+          const teamPlayers = await db.select()
             .from(players)
             .where(eq(players.current_team_id, teamId));
 
@@ -143,28 +141,18 @@ export const TeamCommands = [
           });
 
         } catch (error) {
-          if (error instanceof Error) {
-            await interaction.editReply({
-              content: `Failed to delete team: ${error.message}`,
-              components: [],
-            });
-          } else {
-            await interaction.editReply({
-              content: 'An unknown error occurred while deleting the team.',
-              components: [],
-            });
-          }
+          console.error('Error in team deletion process:', error);
+          const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+          await interaction.editReply({
+            content: `Failed to delete team: ${errorMessage}`,
+            components: [],
+          });
         }
 
       } catch (error) {
         console.error('Error in delete team command:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        // Use editReply instead of reply since we might have already replied
-        if (interaction.deferred) {
-          await interaction.editReply(`Failed to delete team: ${errorMessage}`);
-        } else {
-          await interaction.reply(`Failed to delete team: ${errorMessage}`);
-        }
+        await interaction.editReply(`Failed to delete team: ${errorMessage}`);
       }
     },
   },
@@ -197,10 +185,7 @@ export const TeamCommands = [
         })
           .from(teams)
           .where(
-            and(
-              eq(teams.name, teamRole.name),
-              eq(teams.guild_id, guildId)
-            )
+            and(eq(teams.name, teamRole.name), eq(teams.guild_id, guildId))
           );
 
         if (!team) {
@@ -224,10 +209,7 @@ export const TeamCommands = [
         })
           .from(contracts)
           .where(
-            and(
-              eq(contracts.team_id, team.id),
-              eq(contracts.status, 'active')
-            )
+            and(eq(contracts.team_id, team.id), eq(contracts.status, 'active'))
           );
 
         // Calculate total salary excluding exempt players
@@ -330,10 +312,7 @@ export const TeamCommands = [
           salary_cap: teams.salary_cap,
         })
           .from(teams)
-          .where(and(
-            eq(teams.name, teamRole.name),
-            eq(teams.guild_id, guildId)
-          ))
+          .where(and(eq(teams.name, teamRole.name), eq(teams.guild_id, guildId)))
           .then(rows => rows[0]);
 
         if (!team) {
@@ -399,10 +378,7 @@ export const TeamCommands = [
           cap_floor: teams.cap_floor,
         })
           .from(teams)
-          .where(and(
-            eq(teams.name, teamRole.name),
-            eq(teams.guild_id, guildId)
-          ))
+          .where(and(eq(teams.name, teamRole.name), eq(teams.guild_id, guildId)))
           .then(rows => rows[0]);
 
         if (!team) {
@@ -452,10 +428,7 @@ export const TeamCommands = [
         const [team] = await db.select()
           .from(teams)
           .where(
-            and(
-              eq(teams.name, teamRole.name),
-              eq(teams.guild_id, guildId)
-            )
+            and(eq(teams.name, teamRole.name), eq(teams.guild_id, guildId))
           );
 
         if (!team) {
@@ -543,10 +516,7 @@ export const TeamCommands = [
             status: 'terminated',
             end_date: new Date()
           })
-          .where(and(
-            eq(contracts.player_id, player.id),
-            eq(contracts.status, 'active')
-          ));
+          .where(and(eq(contracts.player_id, player.id), eq(contracts.status, 'active')));
 
         // Update Discord roles if possible
         if (interaction.guild) {
@@ -639,10 +609,7 @@ export const TeamCommands = [
         }
 
         const teamPlayers = await db.query.players.findMany({
-          where: and(
-            eq(players.current_team_id, selectedTeamId),
-            eq(players.status, 'signed')
-          ),
+          where: and(eq(players.current_team_id, selectedTeamId), eq(players.status, 'signed'))
         });
 
         if (teamPlayers.length === 0) {
@@ -743,10 +710,7 @@ export const TeamCommands = [
             status: 'terminated',
             end_date: new Date()
           })
-          .where(and(
-            eq(contracts.player_id, player.id),
-            eq(contracts.status, 'active')
-          ));
+          .where(and(eq(contracts.player_id, player.id), eq(contracts.status, 'active')));
 
         // Update Discord roles if possible
         if (interaction.guild) {
