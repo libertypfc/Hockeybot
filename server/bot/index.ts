@@ -432,6 +432,20 @@ export class DiscordBot extends Client {
 
     try {
       if (!this.hasRegisteredCommands) {
+        await this.registerCommandsWithRetry();
+      }
+    } catch (error) {
+      this.log(`Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      // Trigger reconnection if command registration fails
+      await this.handleDisconnect();
+    }
+  }
+
+  private async registerCommandsWithRetry(maxAttempts = 3): Promise<void> {
+    let attempt = 0;
+
+    while (attempt < maxAttempts) {
+      try {
         await initializeAchievements();
         this.log('Achievements initialized', 'info');
 
@@ -441,9 +455,84 @@ export class DiscordBot extends Client {
 
         // Start periodic checks after successful initialization
         this.startPeriodicChecks();
+        return;
+      } catch (error) {
+        attempt++;
+        this.log(`Command registration attempt ${attempt} failed: ${error}`, 'error');
+
+        if (attempt === maxAttempts) {
+          throw new Error(`Failed to register commands after ${maxAttempts} attempts`);
+        }
+
+        // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt), 30000)));
       }
+    }
+  }
+
+  async start(): Promise<boolean> {
+    if (this.isConnecting) {
+      this.log('Already attempting to connect...', 'warn');
+      return false;
+    }
+
+    this.isConnecting = true;
+    const { timeout } = this.calculateBackoff();
+
+    try {
+      if (!process.env.DISCORD_TOKEN) {
+        throw new Error('DISCORD_TOKEN environment variable is not set');
+      }
+
+      this.log(`Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
+
+      this.stopHeartbeat();
+      this.stopConnectionMonitor();
+
+      // Clear any existing state
+      this.commands = new Collection();
+      this.removeAllListeners();
+      this.setupEventHandlers();
+
+      // Increase timeout for initial connection
+      const loginTimeout = Math.max(timeout, 60000); // At least 60 seconds for initial connection
+
+      await Promise.race([
+        this.login(process.env.DISCORD_TOKEN),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Login timed out')), loginTimeout)
+        )
+      ]);
+
+      // Wait for ready event with increased timeout
+      await new Promise<void>((resolve, reject) => {
+        const readyTimeout = setTimeout(() => {
+          reject(new Error('Ready event timed out'));
+        }, loginTimeout);
+
+        this.once(Events.ClientReady, () => {
+          clearTimeout(readyTimeout);
+          resolve();
+        });
+      });
+
+      this.log('Connection established successfully', 'info');
+      this.isConnecting = false;
+      this.reconnectAttempt = 0;
+      return true;
+
     } catch (error) {
-      this.log(`Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      this.log(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+
+      if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
+        this.reconnectAttempt++;
+        this.isConnecting = false;
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Add delay between retries
+        return this.start();
+      }
+
+      this.isConnecting = false;
+      throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
     }
   }
 
@@ -487,68 +576,6 @@ export class DiscordBot extends Client {
     this.log('Connection resumed', 'info');
     this.startHeartbeat();
     this.startConnectionMonitor();
-  }
-
-  async start(): Promise<boolean> {
-    if (this.isConnecting) {
-      this.log('Already attempting to connect...', 'warn');
-      return false;
-    }
-
-    this.isConnecting = true;
-    const { timeout } = this.calculateBackoff();
-
-    try {
-      if (!process.env.DISCORD_TOKEN) {
-        throw new Error('DISCORD_TOKEN environment variable is not set');
-      }
-
-      this.log(`Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
-
-      this.stopHeartbeat();
-      this.stopConnectionMonitor();
-
-      // Clear any existing state
-      this.commands = new Collection();
-      this.removeAllListeners();
-      this.setupEventHandlers();
-
-      await Promise.race([
-        this.login(process.env.DISCORD_TOKEN),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Login timed out')), timeout)
-        )
-      ]);
-
-      await new Promise<void>((resolve, reject) => {
-        const readyTimeout = setTimeout(() => {
-          reject(new Error('Ready event timed out'));
-        }, timeout);
-
-        this.once(Events.ClientReady, () => {
-          clearTimeout(readyTimeout);
-          resolve();
-        });
-      });
-
-      this.log('Connection established successfully', 'info');
-      this.isConnecting = false;
-      this.reconnectAttempt = 0;
-      return true;
-
-    } catch (error) {
-      this.log(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-
-      if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
-        this.reconnectAttempt++;
-        this.isConnecting = false;
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Add delay between retries
-        return this.start();
-      }
-
-      this.isConnecting = false;
-      throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
-    }
   }
 
   private async destroy() {
