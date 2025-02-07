@@ -20,9 +20,9 @@ export class DiscordBot extends Client {
   private isConnecting: boolean = false;
   private reconnectAttempt: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
-  private readonly INITIAL_CONNECT_TIMEOUT = 60000; // Increased to 60 seconds
+  private readonly INITIAL_CONNECT_TIMEOUT = 60000;
   private readonly MAX_CONNECT_TIMEOUT = 300000;
-  private readonly INITIAL_RECONNECT_DELAY = 5000; // Increased initial delay
+  private readonly INITIAL_RECONNECT_DELAY = 5000;
   private readonly MAX_RECONNECT_DELAY = 60000;
   private heartbeatInterval?: NodeJS.Timeout;
   private connectionMonitor?: NodeJS.Timeout;
@@ -51,10 +51,11 @@ export class DiscordBot extends Client {
           type: 0
         }]
       },
-      waitGuildTimeout: 15000,
+      allowedMentions: { parse: ['users', 'roles'] },
       rest: {
         timeout: 60000,
-        retries: 5
+        retries: 5,
+        version: '10'
       }
     });
 
@@ -419,6 +420,8 @@ export class DiscordBot extends Client {
 
   private async handleReady(client: Client) {
     this.log('Bot is ready and connected to Discord', 'info');
+    this.log(`Bot User Info: ${client.user?.tag} (ID: ${client.user?.id})`, 'debug');
+    this.log(`Guilds: ${client.guilds.cache.size}`, 'debug');
 
     // Reset reconnection counter on successful connection
     this.reconnectAttempt = 0;
@@ -431,7 +434,9 @@ export class DiscordBot extends Client {
 
       // Register commands with retries
       if (!this.hasRegisteredCommands) {
+        this.log('Starting command registration...', 'debug');
         await this.registerCommandsWithRetry();
+        this.log('Command registration completed', 'debug');
       }
 
       // Start monitoring systems

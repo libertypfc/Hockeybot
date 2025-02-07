@@ -32,9 +32,16 @@ export async function registerCommands(client: Client) {
   }
 
   console.log('Starting command registration process...');
-  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
+  const token = process.env.DISCORD_TOKEN;
+  if (!token) {
+    throw new Error('Discord token not found');
+  }
+
+  const rest = new REST({ version: '10' }).setToken(token);
 
   try {
+    console.log('Started refreshing application (/) commands.');
+
     // Create a new Collection for commands
     client.commands = new Collection();
 
@@ -60,19 +67,29 @@ export async function registerCommands(client: Client) {
       }
     }
 
-    // Convert commands to API format
+    // Convert commands to JSON
     const commandData = Array.from(validCommands.values()).map(cmd => cmd.data.toJSON());
     console.log(`Prepared ${commandData.length} commands for registration`);
 
-    // Clear existing commands first
-    console.log('Clearing existing commands...');
-    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
-    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for clear to propagate
+    // Delete all existing commands
+    console.log(`Deleting existing commands for application ${client.user.id}`);
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: [] }
+    );
+
+    // Wait for deletion to propagate
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Register new commands
-    console.log('Registering new commands...');
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commandData });
-    console.log(`Successfully registered ${commandData.length} commands`);
+    console.log(`Registering ${commandData.length} commands for application ${client.user.id}`);
+    const data = await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commandData }
+    );
+
+    console.log('Successfully registered application (/) commands.');
+    console.log('Registration response:', data);
 
     hasRegisteredGlobally = true;
     return true;
