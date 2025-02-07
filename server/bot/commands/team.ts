@@ -2,7 +2,7 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits }
 import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
-import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder } from 'discord.js';
+import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder, ComponentType } from 'discord.js';
 
 export const TeamCommands = [
   {
@@ -167,46 +167,47 @@ export const TeamCommands = [
           return interaction.editReply('This command must be run in a guild.');
         }
 
-        // Get team information
-        const team = await db.query.teams.findFirst({
-          where: and(
-            eq(teams.name, teamRole.name),
-            eq(teams.guildId, guildId)
-          ),
-          columns: {
-            id: true,
-            name: true,
-            salaryCap: true,
-            availableCap: true,
-          },
-        });
+        // Get team information using select instead of query
+        const [team] = await db.select({
+          id: teams.id,
+          name: teams.name,
+          salaryCap: teams.salary_cap,
+          availableCap: teams.available_cap,
+        })
+          .from(teams)
+          .where(
+            and(
+              eq(teams.name, teamRole.name),
+              eq(teams.guild_id, guildId)
+            )
+          );
 
         if (!team) {
           return interaction.editReply('Team not found in database for this guild');
         }
 
         // Get all players on the team with their active contracts
-        const teamPlayers = await db.query.players.findMany({
-          where: eq(players.currentTeamId, team.id),
-          columns: {
-            id: true,
-            username: true,
-            discordId: true,
-            salaryExempt: true,
-          },
-        });
+        const teamPlayers = await db.select({
+          id: players.id,
+          username: players.username,
+          discordId: players.discordId,
+          salaryExempt: players.salaryExempt,
+        })
+          .from(players)
+          .where(eq(players.currentTeamId, team.id));
 
         // Get active contracts for the team
-        const activeContracts = await db.query.contracts.findMany({
-          where: and(
-            eq(contracts.teamId, team.id),
-            eq(contracts.status, 'active')
-          ),
-          columns: {
-            playerId: true,
-            salary: true,
-          },
-        });
+        const activeContracts = await db.select({
+          playerId: contracts.playerId,
+          salary: contracts.salary,
+        })
+          .from(contracts)
+          .where(
+            and(
+              eq(contracts.teamId, team.id),
+              eq(contracts.status, 'active')
+            )
+          );
 
         // Calculate total salary excluding exempt players
         const totalSalary = activeContracts.reduce((sum, contract) => {
