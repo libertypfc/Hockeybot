@@ -1,4 +1,4 @@
-import { Client, Collection, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { Client, Collection, REST, Routes, SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { TeamCommands } from './team';
 import { ContractCommands } from './contract';
 import { WaiversCommands } from './waivers';
@@ -8,47 +8,72 @@ import { AdminCommands } from './admin';
 import { SeasonCommands } from './season';
 import { OrganizationCommands } from './organization';
 
-const registeredCommands = new Set<string>();
+// Track registered command names globally
+const registeredCommands = new Map<string, {
+  data: SlashCommandBuilder;
+  execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+}>();
+
+function validateAndRegisterCommand(command: any) {
+  if (!command.data || !(command.data instanceof SlashCommandBuilder)) {
+    console.warn(`Skipping invalid command: ${command.data?.name || 'unknown'}`);
+    return false;
+  }
+
+  const commandName = command.data.name;
+  if (registeredCommands.has(commandName)) {
+    console.warn(`Duplicate command found: ${commandName}, skipping...`);
+    return false;
+  }
+
+  registeredCommands.set(commandName, command);
+  return true;
+}
 
 export async function registerCommands(client: Client) {
   if (!client.user) {
     throw new Error('Client user is not available');
   }
 
-  // Clear existing commands
+  // Clear any existing commands
   client.commands = new Collection();
+  registeredCommands.clear();
 
-  // Combine all command modules
-  const commands = [
-    ...TeamCommands,
-    ...ContractCommands,
-    ...WaiversCommands,
-    ...TradeCommands,
-    ...DatabaseCommands,
-    ...AdminCommands,
-    ...SeasonCommands,
-    ...OrganizationCommands,
+  // Process all command modules
+  console.log('Starting command registration process...');
+
+  const commandModules = [
+    { name: 'Team', commands: TeamCommands },
+    { name: 'Contract', commands: ContractCommands },
+    { name: 'Waivers', commands: WaiversCommands },
+    { name: 'Trade', commands: TradeCommands },
+    { name: 'Database', commands: DatabaseCommands },
+    { name: 'Admin', commands: AdminCommands },
+    { name: 'Season', commands: SeasonCommands },
+    { name: 'Organization', commands: OrganizationCommands },
   ];
 
-  console.log(`Processing ${commands.length} commands for registration...`);
-
-  // Register unique commands to the collection
-  for (const command of commands) {
-    if (!command.data || !(command.data instanceof SlashCommandBuilder)) {
-      console.warn(`Skipping invalid command: ${command.data?.name || 'unknown'}`);
+  // Register commands from each module
+  for (const module of commandModules) {
+    console.log(`Processing ${module.name} commands...`);
+    if (!Array.isArray(module.commands)) {
+      console.warn(`Invalid command module: ${module.name}, skipping...`);
       continue;
     }
 
-    const commandName = command.data.name;
-    if (registeredCommands.has(commandName)) {
-      console.warn(`Skipping duplicate command: ${commandName}`);
-      continue;
+    for (const command of module.commands) {
+      if (validateAndRegisterCommand(command)) {
+        console.log(`Registered command: ${command.data.name}`);
+      }
     }
-
-    console.log(`Adding command to collection: ${commandName}`);
-    client.commands.set(commandName, command);
-    registeredCommands.add(commandName);
   }
+
+  // Convert registered commands to Collection for Discord.js
+  for (const [name, command] of registeredCommands) {
+    client.commands.set(name, command);
+  }
+
+  console.log(`Successfully processed ${registeredCommands.size} unique commands`);
 
   // Register commands with Discord API
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
@@ -64,20 +89,20 @@ export async function registerCommands(client: Client) {
       throw new Error('Bot is not in any guilds. Please add the bot to a server first.');
     }
 
+    // Prepare command data once
+    const commandData = Array.from(registeredCommands.values())
+      .map(command => command.data.toJSON());
+
     // Register commands for each guild
     for (const guild of guilds) {
-      console.log(`Registering commands for guild: ${guild.id}`);
-
-      const commandData = Array.from(client.commands.values())
-        .filter(cmd => cmd.data instanceof SlashCommandBuilder)
-        .map(command => command.data.toJSON());
+      console.log(`Registering ${commandData.length} commands for guild: ${guild.id}`);
 
       await rest.put(
         Routes.applicationGuildCommands(client.user.id, guild.id),
         { body: commandData },
       );
 
-      console.log(`Successfully registered ${commandData.length} commands in guild ${guild.id}`);
+      console.log(`Successfully registered commands in guild ${guild.id}`);
     }
 
     console.log('Successfully registered application (/) commands in all guilds.');

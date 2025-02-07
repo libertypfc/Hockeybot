@@ -443,6 +443,7 @@ export class DiscordBot extends Client {
       await initializeAchievements();
       this.log('Achievements initialized', 'info');
 
+      // Register commands only once during startup
       await registerCommands(this);
       this.log('Commands registered successfully', 'info');
 
