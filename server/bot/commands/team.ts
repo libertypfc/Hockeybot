@@ -15,7 +15,7 @@ export const TeamCommands = [
       try {
         // Get all teams from database for the current guild
         const allTeams = await db.query.teams.findMany({
-          where: eq(teams.guild_id, interaction.guildId)
+          where: eq(teams.guildId, interaction.guildId)
         });
 
         if (allTeams.length === 0) {
@@ -563,6 +563,112 @@ export const TeamCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('exemptplayer')
+      .setDescription('Set a player as salary cap exempt'),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      try {
+        const guildId = interaction.guildId;
+
+        if (!guildId) {
+          return interaction.reply('This command must be run in a guild.');
+        }
+
+        const allTeams = await db.query.teams.findMany({
+          with: {
+            players: {
+              where: eq(players.status, 'signed'),
+            },
+          },
+          where: eq(teams.guildId, guildId)
+        });
+
+        if (allTeams.length === 0) {
+          return interaction.reply('No teams found.');
+        }
+
+        const teamSelect = new StringSelectMenuBuilder()
+          .setCustomId('team-select')
+          .setPlaceholder('Select a team')
+          .addOptions(allTeams.map(team => new StringSelectMenuOptionBuilder()
+            .setLabel(team.name)
+            .setValue(team.id.toString())
+            .setDescription(`Select ${team.name}`)
+          ));
+
+        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(teamSelect);
+        const response = await interaction.reply({ content: 'Select a team', components: [row] });
+
+        const teamSelection = await response.awaitMessageComponent({
+          filter: i => i.user.id === interaction.user.id,
+          time: 30000,
+          componentType: ComponentType.StringSelect,
+        });
+
+        const selectedTeamId = parseInt(teamSelection.values[0]);
+        const selectedTeam = allTeams.find(t => t.id === selectedTeamId);
+
+        if (!selectedTeam) {
+          return teamSelection.update({
+            content: 'Selected team not found.',
+            components: [],
+          });
+        }
+
+        const teamPlayers = await db.query.players.findMany({
+          where: and(
+            eq(players.currentTeamId, selectedTeamId),
+            eq(players.status, 'signed')
+          ),
+        });
+
+        if (teamPlayers.length === 0) {
+          return teamSelection.update({ content: 'No players found on this team.', components: [] });
+        }
+
+
+        const playerSelect = new StringSelectMenuBuilder()
+          .setCustomId('player-select')
+          .setPlaceholder('Select a player')
+          .addOptions(teamPlayers.map(player => new StringSelectMenuOptionBuilder()
+            .setLabel(player.username)
+            .setValue(player.id.toString())
+            .setDescription(`Select ${player.username}`)
+          ));
+
+        const playerRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(playerSelect);
+        const playerResponse = await teamSelection.update({ content: 'Select a player to exempt', components: [playerRow] });
+
+
+        const playerSelection = await playerResponse.awaitMessageComponent({
+          filter: i => i.user.id === interaction.user.id,
+          time: 30000,
+          componentType: ComponentType.StringSelect,
+        });
+
+        const selectedPlayerId = parseInt(playerSelection.values[0]);
+        const selectedPlayer = teamPlayers.find(p => p.id === selectedPlayerId);
+
+        if (!selectedPlayer) {
+          return playerSelection.update({ content: 'Selected player not found.', components: [] });
+        }
+
+        await db.update(players).set({ salaryExempt: true }).where(eq(players.id, selectedPlayerId));
+
+        await playerSelection.update({ content: `${selectedPlayer.username} is now salary cap exempt.`, components: [] });
+
+      } catch (error) {
+        console.error('Error in exemption process:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply({
+          content: `Failed to manage player exemption: ${errorMessage}`,
+          components: [],
+        });
+      }
+    },
+  }
 ];
 
 // Helper function for assigning free agent role
