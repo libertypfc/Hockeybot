@@ -6,7 +6,7 @@ import { teams, players, contracts } from '@db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
-  const port = process.env.PORT || 3000;
+  const port = Number(process.env.PORT) || 3000;
 
   // API Routes
   app.get('/api/servers', async (req, res) => {
@@ -189,10 +189,10 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Create HTTP server with consistent port
+  // Create HTTP server with consistent port and host binding
   const httpServer = createServer(app);
 
-  httpServer.listen(port, () => {
+  httpServer.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
     // Start the bot but don't wait for it
     startBot().catch(error => {
