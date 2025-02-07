@@ -1,7 +1,8 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder, ChannelType } from 'discord.js';
 import { db } from '@db';
 import { teams, players, contracts, waivers } from '@db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { sql } from 'drizzle-orm/sql';
 
 const REQUIRED_ROLE_NAME = "Database Manager";
 
@@ -58,7 +59,7 @@ export const DatabaseCommands = [
               .setRequired(true))
           .addIntegerOption(option =>
             option.setName('salary')
-              .setDescription('Player salary')
+              .setDescription('Annual salary in millions')
               .setRequired(true))
       )
       .addSubcommand(subcommand =>
@@ -84,9 +85,7 @@ export const DatabaseCommands = [
         await interaction.deferReply({ ephemeral: true });
         console.log('Database command initiated by:', interaction.user.tag);
 
-        // Check if command is used in a guild
         if (!interaction.guild || !interaction.member) {
-          console.log('Command used outside of guild context');
           return await interaction.editReply('This command can only be used in a server.');
         }
 
@@ -135,6 +134,7 @@ export const DatabaseCommands = [
             const categoryId = interaction.options.getString('categoryid', true);
             const guildId = interaction.guildId!;
 
+            // Insert team with correct column names
             const [team] = await db.insert(teams)
               .values({
                 name,
@@ -156,10 +156,15 @@ export const DatabaseCommands = [
             const teamRole = interaction.options.getRole('team', true);
             const salary = interaction.options.getInteger('salary', true);
 
-            // Get team
-            const team = await db.query.teams.findFirst({
-              where: eq(teams.name, teamRole.name),
-            });
+            // Get team using explicit field selection
+            const team = await db.select({
+              id: teams.id,
+              name: teams.name,
+              available_cap: teams.available_cap
+            })
+            .from(teams)
+            .where(eq(teams.name, teamRole.name))
+            .then(rows => rows[0]);
 
             if (!team) {
               return interaction.editReply('Team not found in database');
@@ -168,6 +173,11 @@ export const DatabaseCommands = [
             // Create or get player
             let player = await db.query.players.findFirst({
               where: eq(players.discordId, user.id),
+              columns: {
+                id: true,
+                username: true,
+                currentTeamId: true
+              }
             });
 
             if (!player) {
@@ -220,10 +230,15 @@ export const DatabaseCommands = [
             const salary = 925000; // Fixed ELC salary
             const lengthInDays = 210; // 30 weeks
 
-            // Get team
-            const team = await db.query.teams.findFirst({
-              where: eq(teams.name, teamRole.name),
-            });
+            // Get team using explicit field selection
+            const team = await db.select({
+              id: teams.id,
+              name: teams.name,
+              available_cap: teams.available_cap
+            })
+            .from(teams)
+            .where(eq(teams.name, teamRole.name))
+            .then(rows => rows[0]);
 
             if (!team) {
               return interaction.editReply('Team not found in database');
@@ -232,6 +247,11 @@ export const DatabaseCommands = [
             // Create or get player
             let player = await db.query.players.findFirst({
               where: eq(players.discordId, user.id),
+              columns: {
+                id: true,
+                username: true,
+                currentTeamId: true
+              }
             });
 
             if (!player) {
