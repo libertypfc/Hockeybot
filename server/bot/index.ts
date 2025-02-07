@@ -653,13 +653,6 @@ async function checkExpiredContracts() {
 client.once(Events.ClientReady, async (c) => {
   console.log(`[Status] Discord bot is ready! Logged in as ${c.user.tag}`);
 
+  // Add a small delay to ensure everything is initialized
   await new Promise(resolve => setTimeout(resolve, 1000));
-
-  try {
-    await registerCommands(client);
-    console.log('[Status] All commands registered successfully!');
-
-  } catch (error) {
-    console.error('[Error] Failed to register commands:', error);
-  }
 });
