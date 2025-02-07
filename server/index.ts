@@ -82,13 +82,14 @@ async function startApplication() {
     // Start Discord bot after server is running
     log('Starting Discord bot...', 'startup');
     try {
-      const botClient = await startBot();
-      if (botClient) {
-        log('Discord bot started successfully', 'startup');
-      }
+      await startBot(); // Attempt to start the bot
+      log('Discord bot started successfully', 'startup');
     } catch (error) {
+      // Log the error but don't throw - allow server to run without bot
       log(`Warning: Failed to start Discord bot: ${error}`, 'startup');
-      // Don't throw error here, allow server to run without bot
+      if (error instanceof Error && error.message.includes('Invalid Discord token')) {
+        log('Please check your Discord token configuration', 'startup');
+      }
     }
 
     return true;

@@ -4,7 +4,6 @@ import { startBot, client } from './bot';
 import { db } from '@db';
 import { teams, players, contracts } from '@db/schema';
 import { eq, and, gte } from 'drizzle-orm';
-import { Client, GatewayIntentBits } from 'discord.js';
 
 export function registerRoutes(app: Express): Server {
   const port = process.env.PORT || 3000;
@@ -12,8 +11,8 @@ export function registerRoutes(app: Express): Server {
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
+      // Check if client exists and is ready
       if (!client) {
-        console.error('Discord client is null');
         return res.status(503).json({
           error: 'Discord connection unavailable',
           details: 'The Discord bot is not initialized'
@@ -21,61 +20,41 @@ export function registerRoutes(app: Express): Server {
       }
 
       if (!client.isReady()) {
-        console.error('Discord client is not ready');
         return res.status(503).json({
           error: 'Discord connection unavailable',
           details: 'The Discord bot is still initializing. Please try again in a few moments.'
         });
       }
 
-      console.log('Client ready, attempting to fetch guilds...');
-
-      // Get cached guilds first
-      let guilds = client.guilds.cache;
-      console.log(`Initial guild cache size: ${guilds.size}`);
-
-      // If cache is empty, try to fetch
-      if (guilds.size === 0) {
-        try {
-          console.log('Cache empty, fetching guilds from Discord API...');
-          const fetchedGuilds = await client.guilds.fetch();
-          guilds = fetchedGuilds;
-          console.log(`Fetched ${guilds.size} guilds from Discord API`);
-        } catch (fetchError) {
-          console.error('Error fetching guilds:', fetchError);
-          return res.status(500).json({
-            error: 'Failed to fetch Discord servers',
-            details: fetchError instanceof Error ? fetchError.message : 'Unknown error fetching servers'
-          });
-        }
-      }
-
-      // Map guild data
-      const servers = Array.from(guilds.values()).map(guild => {
-        console.log(`Processing guild: ${guild.id} - ${guild.name}`);
-        return {
+      // Attempt to fetch guilds
+      try {
+        const guilds = await client.guilds.fetch();
+        const servers = Array.from(guilds.values()).map(guild => ({
           id: guild.id,
           name: guild.name,
-          memberCount: guild.memberCount
-        };
-      });
+          memberCount: guild.memberCount || 0
+        }));
 
-      if (servers.length === 0) {
-        console.log('No servers found in the response');
-        return res.status(404).json({
-          error: 'No servers found',
-          details: 'The bot is not a member of any Discord servers. Please add the bot to a server first.'
+        if (servers.length === 0) {
+          return res.status(404).json({
+            error: 'No servers found',
+            details: 'The bot is not a member of any Discord servers'
+          });
+        }
+
+        return res.json(servers);
+      } catch (fetchError) {
+        console.error('Failed to fetch guilds:', fetchError);
+        return res.status(500).json({
+          error: 'Failed to fetch servers',
+          details: fetchError instanceof Error ? fetchError.message : 'Failed to retrieve server list'
         });
       }
-
-      console.log(`Returning ${servers.length} servers:`, servers);
-      res.json(servers);
-
     } catch (error) {
-      console.error('Unexpected error in /api/servers route:', error);
-      res.status(500).json({ 
-        error: 'Failed to fetch servers',
-        details: error instanceof Error ? error.message : 'Unknown error occurred while fetching servers'
+      console.error('Unexpected error in /api/servers:', error);
+      return res.status(500).json({
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'An unexpected error occurred'
       });
     }
   });
@@ -200,8 +179,9 @@ export function registerRoutes(app: Express): Server {
 
   httpServer.listen(port, () => {
     console.log(`Server is running on port ${port}`);
+    // Start the bot but don't wait for it
     startBot().catch(error => {
-      console.error('Failed to start bot, but server will continue running:', error);
+      console.error('Failed to start bot:', error);
     });
   });
 
