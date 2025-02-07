@@ -32,10 +32,24 @@ export async function registerCommands(client: Client) {
   }
 
   console.log('Starting command registration process...');
+
+  // Validate environment variables
   const token = process.env.DISCORD_TOKEN;
+  const guildId = process.env.DISCORD_GUILD_ID;
+
   if (!token) {
+    console.error('Discord token not found');
     throw new Error('Discord token not found');
   }
+
+  if (!guildId) {
+    console.error('Discord guild ID not found');
+    throw new Error('Discord guild ID not found');
+  }
+
+  console.log('Environment variables validated');
+  console.log(`Bot application ID: ${client.user.id}`);
+  console.log(`Target guild ID: ${guildId}`);
 
   const rest = new REST({ version: '10' }).setToken(token);
 
@@ -46,10 +60,16 @@ export async function registerCommands(client: Client) {
     client.commands = new Collection();
 
     // Collect valid commands
-    const validCommands = new Map<string, any>();
+    const validCommands = new Map<string, {
+      data: SlashCommandBuilder;
+      execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+    }>();
 
     // Process each command module
+    console.log('Processing command modules...');
     for (const [moduleName, moduleCommands] of Object.entries(CommandModules)) {
+      console.log(`Processing module: ${moduleName}`);
+
       if (!Array.isArray(moduleCommands)) {
         console.warn(`Invalid module ${moduleName}, skipping...`);
         continue;
@@ -67,11 +87,38 @@ export async function registerCommands(client: Client) {
         try {
           // Verify command data can be converted to JSON
           const commandJSON = command.data.toJSON();
-          validCommands.set(commandName, command);
-          client.commands.set(commandName, command);
-          console.log(`Command ${commandName} validated successfully`);
+          console.log(`Command ${commandName} data:`, JSON.stringify(commandJSON, null, 2));
+
+          // Wrap the execute function to ensure it always returns Promise<void>
+          const wrappedExecute = async (interaction: ChatInputCommandInteraction) => {
+            try {
+              await command.execute(interaction);
+            } catch (error) {
+              console.error(`Error executing command ${commandName}:`, error);
+              throw error;
+            }
+          };
+
+          validCommands.set(commandName, {
+            data: command.data,
+            execute: wrappedExecute
+          });
+
+          client.commands.set(commandName, {
+            data: command.data,
+            execute: wrappedExecute
+          });
+
+          console.log(`Command ${commandName} validated and registered successfully`);
         } catch (error) {
           console.error(`Failed to validate command ${commandName}:`, error);
+          if (error instanceof Error) {
+            console.error('Error details:', {
+              name: error.name,
+              message: error.message,
+              stack: error.stack
+            });
+          }
           continue;
         }
       }
@@ -86,29 +133,44 @@ export async function registerCommands(client: Client) {
 
     console.log(`Prepared ${commandData.length} commands for registration`);
 
-    // Delete all existing commands
-    console.log(`Deleting existing commands for application ${client.user.id}`);
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: [] }
-    );
+    try {
+      // Delete all existing commands first
+      console.log(`Deleting existing commands for application ${client.user.id} in guild ${guildId}`);
+      await rest.put(
+        Routes.applicationGuildCommands(client.user.id, guildId),
+        { body: [] }
+      );
 
-    // Wait for deletion to propagate
-    console.log('Waiting for command deletion to propagate...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+      // Wait for deletion to propagate
+      console.log('Waiting for command deletion to propagate...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
-    // Register new commands
-    console.log(`Registering ${commandData.length} commands for application ${client.user.id}`);
-    const data = await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commandData }
-    );
+      // Register new commands
+      console.log(`Registering ${commandData.length} commands for application ${client.user.id} in guild ${guildId}`);
+      console.log('Command registration payload:', JSON.stringify(commandData, null, 2));
 
-    console.log('Successfully registered application (/) commands.');
-    console.log('Registration response:', data);
+      const data = await rest.put(
+        Routes.applicationGuildCommands(client.user.id, guildId),
+        { body: commandData }
+      );
 
-    hasRegisteredGlobally = true;
-    return true;
+      console.log('Successfully registered application (/) commands.');
+      console.log('Registration response:', data);
+
+      hasRegisteredGlobally = true;
+      return true;
+
+    } catch (error) {
+      console.error('Error in command registration request:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('Missing Access')) {
+          throw new Error('Bot lacks permissions to create commands. Ensure bot has "applications.commands" scope');
+        } else if (error.message.includes('Unknown Guild')) {
+          throw new Error(`Bot is not in the specified guild (ID: ${guildId})`);
+        }
+      }
+      throw error;
+    }
 
   } catch (error) {
     console.error('Error in command registration:', error);

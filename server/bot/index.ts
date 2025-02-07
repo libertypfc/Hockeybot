@@ -43,6 +43,10 @@ export class DiscordBot extends Client {
         GatewayIntentBits.GuildPresences,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildIntegrations,
+        GatewayIntentBits.GuildWebhooks,
+        GatewayIntentBits.GuildInvites,
+        GatewayIntentBits.GuildModeration,
       ],
       presence: {
         status: 'online',
@@ -52,11 +56,6 @@ export class DiscordBot extends Client {
         }]
       },
       allowedMentions: { parse: ['users', 'roles'] },
-      rest: {
-        timeout: 60000,
-        retries: 5,
-        version: '10'
-      }
     });
 
     this.commands = new Collection();
@@ -64,32 +63,34 @@ export class DiscordBot extends Client {
     DiscordBot.instance = this;
   }
 
-  private log(message: string, level: 'info' | 'error' | 'warn' | 'debug' = 'info') {
+  private cleanup(): void {
+    try {
+      this.removeAllListeners();
+      if (this.ws) {
+        this.ws.removeAllListeners();
+      }
+      this.guilds.cache.clear();
+      this.channels.cache.clear();
+      this.users.cache.clear();
+      this.stopHeartbeat();
+      this.stopConnectionMonitor();
+    } catch (error) {
+      this.log(`Error during cleanup: ${error}`, 'error');
+    }
+  }
+
+  private log(message: string, level: 'info' | 'error' | 'warn' | 'debug' = 'info'): void {
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [BOT ${level.toUpperCase()}] ${message}`);
   }
 
-  private calculateBackoff(): { delay: number; timeout: number } {
-    const backoffFactor = Math.min(Math.pow(1.5, this.reconnectAttempt), 5);
-    const jitter = Math.random() * 500;
-    const delay = Math.min(
-      this.INITIAL_RECONNECT_DELAY * backoffFactor + jitter,
-      this.MAX_RECONNECT_DELAY
-    );
-    const timeout = Math.min(
-      this.INITIAL_CONNECT_TIMEOUT * backoffFactor,
-      this.MAX_CONNECT_TIMEOUT
-    );
-    return { delay, timeout };
-  }
-
-  private setupEventHandlers() {
+  private setupEventHandlers(): void {
     this.on(Events.Error, this.handleError.bind(this));
     this.on(Events.Debug, this.handleDebug.bind(this));
     this.on(Events.Warn, this.handleWarning.bind(this));
     this.once(Events.ClientReady, this.handleReady.bind(this));
-    this.on('disconnect', this.handleDisconnect.bind(this));
-    this.on('resume', this.handleResume.bind(this));
+    this.on(Events.Disconnect, this.handleDisconnect.bind(this));
+    this.on(Events.Resume, this.handleResume.bind(this));
     this.ws?.on('close', this.handleWebSocketClose.bind(this));
 
     this.ws?.on('sessionStarted', (data: any) => {
@@ -297,7 +298,7 @@ export class DiscordBot extends Client {
     });
   }
 
-  private startHeartbeat() {
+  private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeatInterval = setInterval(() => {
       if (!this.ws?.ping) {
@@ -309,67 +310,186 @@ export class DiscordBot extends Client {
       const ping = this.ws.ping;
       if (ping > 200) {
         this.log(`High latency detected: ${ping}ms`, 'warn');
-
-        this.channels.cache.clear();
-        this.users.cache.clear();
-        this.guilds.cache.sweep(guild => !guild.available);
-
-        if (ping > 500) {
-          this.log('Latency exceeded threshold, initiating clean reconnection', 'warn');
-          this.destroy();
-          this.handleDisconnect();
-          return;
-        }
       }
-
-      this.log(`Heartbeat OK - Latency: ${ping}ms`, 'debug');
     }, 20000);
   }
 
-  private startConnectionMonitor() {
-    this.stopConnectionMonitor();
-    this.connectionMonitor = setInterval(() => {
-      if (!this.isReady() || !this.ws?.ping) {
-        this.log('Connection monitor detected potential disconnection', 'warn');
-        this.handleDisconnect();
-        return;
-      }
-
-      this.removeAllListeners('disconnect');
-      this.removeAllListeners('resume');
-      this.on('disconnect', this.handleDisconnect.bind(this));
-      this.on('resume', this.handleResume.bind(this));
-
-      if (global.gc) {
-        try {
-          global.gc();
-        } catch (error) {
-          this.log('Failed to run garbage collection', 'debug');
-        }
-      }
-
-      const guilds = this.guilds.cache.size;
-      if (guilds === 0 && !this.isConnecting) {
-        this.log('No guilds available, possible connection issue', 'warn');
-        this.handleDisconnect();
-      }
-    }, 60000);
-  }
-
-  private stopHeartbeat() {
+  private stopHeartbeat(): void {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = undefined;
     }
   }
 
-  private stopConnectionMonitor() {
+  private startConnectionMonitor(): void {
+    this.stopConnectionMonitor();
+    this.connectionMonitor = setInterval(() => {
+      if (!this.isReady() || !this.ws?.ping) {
+        this.log('Connection monitor detected potential disconnection', 'warn');
+        this.handleDisconnect();
+      }
+    }, 60000);
+  }
+
+  private stopConnectionMonitor(): void {
     if (this.connectionMonitor) {
       clearInterval(this.connectionMonitor);
       this.connectionMonitor = undefined;
     }
   }
 
+  async start(): Promise<boolean> {
+    if (this.isConnecting) {
+      this.log('Already attempting to connect...', 'warn');
+      return false;
+    }
+
+    this.isConnecting = true;
+
+    try {
+      const token = process.env.DISCORD_TOKEN;
+      if (!token) {
+        throw new Error('DISCORD_TOKEN environment variable is not set');
+      }
+
+      // Validate token format
+      if (!token.startsWith('MTA') && !token.startsWith('MTI')) {
+        throw new Error('Invalid Discord bot token format. Token should start with MTA or MTI');
+      }
+
+      if (token.length < 50) {
+        throw new Error('Invalid Discord bot token length. Token seems too short');
+      }
+
+      this.log(`Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
+      this.log('Validating token format...', 'debug');
+
+      this.cleanup();
+      this.commands = new Collection();
+      this.setupEventHandlers();
+
+      try {
+        await this.login(token);
+        this.log('Login successful', 'info');
+      } catch (loginError) {
+        if (loginError instanceof Error) {
+          // Provide more specific error messages based on the error
+          if (loginError.message.includes('invalid token')) {
+            throw new Error('Discord rejected the token. Please verify the token is correct and not expired');
+          } else if (loginError.message.includes('disallowed intents')) {
+            throw new Error('Bot token valid but missing required privileged intents. Enable them in Discord Developer Portal');
+          }
+          throw loginError;
+        }
+        throw new Error('Unknown login error occurred');
+      }
+
+      this.log('Connection established successfully', 'info');
+      this.isConnecting = false;
+      this.reconnectAttempt = 0;
+      return true;
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.log(`Connection failed: ${errorMessage}`, 'error');
+      console.error('Full error details:', error);
+
+      if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
+        this.reconnectAttempt++;
+        this.isConnecting = false;
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        return this.start();
+      }
+
+      this.isConnecting = false;
+      throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts: ${errorMessage}`);
+    }
+  }
+
+  private handleError(error: Error): void {
+    this.log(`Error encountered: ${error.message}`, 'error');
+    console.error(error);
+
+    if (!this.isConnecting) {
+      this.reconnectAttempt = 0;
+      this.start().catch(e => this.log(`Reconnection failed: ${e.message}`, 'error'));
+    }
+  }
+
+  private handleWarning(message: string): void {
+    this.log(message, 'warn');
+  }
+
+  private handleDebug(message: string): void {
+    if (message.includes('Session Limit Information') ||
+        message.includes('Gateway') ||
+        message.includes('Heartbeat') ||
+        message.includes('WebSocket')) {
+      this.log(message, 'debug');
+    }
+  }
+
+  private handleDisconnect(): void {
+    this.log('Disconnected from Discord', 'warn');
+    this.cleanup();
+
+    if (!this.isConnecting) {
+      this.start().catch(error => {
+        this.log(`Failed to reconnect: ${error.message}`, 'error');
+      });
+    }
+  }
+
+  private handleResume(): void {
+    this.log('Connection resumed', 'info');
+    this.startHeartbeat();
+    this.startConnectionMonitor();
+  }
+
+  private async registerCommandsWithRetry(maxAttempts = 5): Promise<void> {
+    let attempt = 0;
+
+    while (attempt < maxAttempts) {
+      try {
+        this.log(`Attempting to register commands (attempt ${attempt + 1}/${maxAttempts})`, 'info');
+
+        if (!this.isReady() || !this.user) {
+          throw new Error('Client not ready for command registration');
+        }
+
+        await registerCommands(this);
+        this.hasRegisteredCommands = true;
+        this.log('Commands registered successfully', 'info');
+        return;
+
+      } catch (error) {
+        attempt++;
+        this.log(`Command registration attempt ${attempt} failed: ${error}`, 'error');
+
+        if (attempt === maxAttempts) {
+          throw new Error(`Failed to register commands after ${maxAttempts} attempts`);
+        }
+
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        this.log(`Waiting ${delay}ms before next attempt`, 'debug');
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  private startPeriodicChecks(): void {
+    setInterval(() => {
+      checkCapCompliance(this).catch(error =>
+        this.log(`Error checking cap compliance: ${error}`, 'error')
+      );
+    }, 15 * 60 * 1000);
+
+    setInterval(() => {
+      checkUptimeAchievements(this).catch(error =>
+        this.log(`Error checking uptime achievements: ${error}`, 'error')
+      );
+    }, 60 * 60 * 1000);
+  }
   private async handleWebSocketClose(code: number) {
     this.log(`WebSocket closed with code ${code}`, 'warn');
 
@@ -393,42 +513,42 @@ export class DiscordBot extends Client {
     await this.start();
   }
 
-  private handleError(error: Error) {
-    this.log(`Error encountered: ${error.message}`, 'error');
-    console.error(error);
-
-    if (!this.isConnecting) {
-      this.reconnectAttempt = 0;
-      this.attemptReconnect().catch(e =>
-        this.log(`Reconnection failed: ${e.message}`, 'error')
-      );
-    }
+  private calculateBackoff(): { delay: number; timeout: number } {
+    const backoffFactor = Math.min(Math.pow(1.5, this.reconnectAttempt), 5);
+    const jitter = Math.random() * 500;
+    const delay = Math.min(
+      this.INITIAL_RECONNECT_DELAY * backoffFactor + jitter,
+      this.MAX_RECONNECT_DELAY
+    );
+    const timeout = Math.min(
+      this.INITIAL_CONNECT_TIMEOUT * backoffFactor,
+      this.MAX_CONNECT_TIMEOUT
+    );
+    return { delay, timeout };
   }
-
-  private handleWarning(message: string) {
-    this.log(message, 'warn');
-  }
-
-  private handleDebug(message: string) {
-    if (message.includes('Session Limit Information') ||
-      message.includes('Gateway') ||
-      message.includes('Heartbeat') ||
-      message.includes('WebSocket')) {
-      this.log(message, 'debug');
-    }
-  }
-
-  private async handleReady(client: Client) {
+  private async handleReady() {
     this.log('Bot is ready and connected to Discord', 'info');
-    this.log(`Bot User Info: ${client.user?.tag} (ID: ${client.user?.id})`, 'debug');
-    this.log(`Connected to ${client.guilds.cache.size} guilds`, 'debug');
-    this.log(`Bot permissions: ${client.user?.flags?.toArray().join(', ') || 'None'}`, 'debug');
+    this.log(`Bot User Info: ${this.user?.tag} (ID: ${this.user?.id})`, 'debug');
+    this.log(`Connected to ${this.guilds.cache.size} guilds`, 'debug');
+    this.log(`Bot permissions: ${this.user?.flags?.toArray().join(', ') || 'None'}`, 'debug');
 
     // Reset reconnection counter on successful connection
     this.reconnectAttempt = 0;
     this.isConnecting = false;
 
     try {
+      // Verify we have the required environment variables
+      if (!process.env.DISCORD_TOKEN || !process.env.DISCORD_GUILD_ID) {
+        throw new Error('Missing required environment variables (DISCORD_TOKEN or DISCORD_GUILD_ID)');
+      }
+
+      // Log guild connection status
+      const targetGuild = this.guilds.cache.get(process.env.DISCORD_GUILD_ID);
+      if (!targetGuild) {
+        throw new Error(`Bot is not connected to the target guild (ID: ${process.env.DISCORD_GUILD_ID})`);
+      }
+      this.log(`Successfully connected to target guild: ${targetGuild.name}`, 'info');
+
       // Initialize achievements first
       await initializeAchievements();
       this.log('Achievements initialized', 'info');
@@ -436,8 +556,13 @@ export class DiscordBot extends Client {
       // Register commands with retries
       if (!this.hasRegisteredCommands) {
         this.log('Starting command registration...', 'debug');
-        await this.registerCommandsWithRetry();
-        this.log('Command registration completed', 'debug');
+        try {
+          await this.registerCommandsWithRetry();
+          this.log('Command registration completed successfully', 'info');
+        } catch (error) {
+          this.log(`Command registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+          throw error;
+        }
       }
 
       // Start monitoring systems
@@ -453,180 +578,12 @@ export class DiscordBot extends Client {
       await this.handleDisconnect();
     }
   }
-
-  private async registerCommandsWithRetry(maxAttempts = 5): Promise<void> {
-    let attempt = 0;
-
-    while (attempt < maxAttempts) {
-      try {
-        this.log(`Attempting to register commands (attempt ${attempt + 1}/${maxAttempts})`, 'info');
-
-        // Verify client state before registration
-        if (!this.isReady() || !this.user) {
-          throw new Error('Client not ready for command registration');
-        }
-
-        await registerCommands(this);
-        this.hasRegisteredCommands = true;
-        this.log('Commands registered successfully', 'info');
-        return;
-
-      } catch (error) {
-        attempt++;
-        this.log(`Command registration attempt ${attempt} failed: ${error}`, 'error');
-        if (error instanceof Error) {
-          this.log(`Error details: ${error.stack}`, 'error');
-        }
-
-        if (attempt === maxAttempts) {
-          throw new Error(`Failed to register commands after ${maxAttempts} attempts`);
-        }
-
-        // Exponential backoff with maximum delay
-        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-        this.log(`Waiting ${delay}ms before next attempt`, 'debug');
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-
-  async start(): Promise<boolean> {
-    if (this.isConnecting) {
-      this.log('Already attempting to connect...', 'warn');
-      return false;
-    }
-
-    this.isConnecting = true;
-    const { timeout } = this.calculateBackoff();
-
-    try {
-      if (!process.env.DISCORD_TOKEN) {
-        throw new Error('DISCORD_TOKEN environment variable is not set');
-      }
-
-      this.log(`Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
-
-      this.stopHeartbeat();
-      this.stopConnectionMonitor();
-
-      // Clear any existing state
-      this.commands = new Collection();
-      this.removeAllListeners();
-      this.setupEventHandlers();
-
-      // Increase timeout for initial connection
-      const loginTimeout = Math.max(timeout, 60000); // At least 60 seconds for initial connection
-
-      await Promise.race([
-        this.login(process.env.DISCORD_TOKEN),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Login timed out')), loginTimeout)
-        )
-      ]);
-
-      // Wait for ready event with increased timeout
-      await new Promise<void>((resolve, reject) => {
-        const readyTimeout = setTimeout(() => {
-          reject(new Error('Ready event timed out'));
-        }, loginTimeout);
-
-        this.once(Events.ClientReady, () => {
-          clearTimeout(readyTimeout);
-          resolve();
-        });
-      });
-
-      this.log('Connection established successfully', 'info');
-      this.isConnecting = false;
-      this.reconnectAttempt = 0;
-      return true;
-
-    } catch (error) {
-      this.log(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-
-      if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
-        this.reconnectAttempt++;
-        this.isConnecting = false;
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Add delay between retries
-        return this.start();
-      }
-
-      this.isConnecting = false;
-      throw new Error(`Failed to connect after ${this.MAX_RECONNECT_ATTEMPTS} attempts`);
-    }
-  }
-
-  private startPeriodicChecks() {
-    setInterval(() => {
-      checkExpiredContracts().catch(error =>
-        this.log(`Error checking expired contracts: ${error}`, 'error')
-      );
-    }, 5 * 60 * 1000);
-
-    setInterval(() => {
-      checkCapCompliance(this).catch(error =>
-        this.log(`Error checking cap compliance: ${error}`, 'error')
-      );
-    }, 15 * 60 * 1000);
-
-    setInterval(() => {
-      checkUptimeAchievements(this).catch(error =>
-        this.log(`Error checking uptime achievements: ${error}`, 'error')
-      );
-    }, 60 * 60 * 1000);
-  }
-
-  private handleDisconnect() {
-    this.log('Disconnected from Discord', 'warn');
-
-    this.stopHeartbeat();
-    this.stopConnectionMonitor();
-
-    this.rest.clearTimeout();
-    this.ws?.destroy();
-
-    if (!this.isConnecting) {
-      this.attemptReconnect().catch(error => {
-        this.log(`Failed to reconnect: ${error.message}`, 'error');
-      });
-    }
-  }
-
-  private handleResume() {
-    this.log('Connection resumed', 'info');
-    this.startHeartbeat();
-    this.startConnectionMonitor();
-  }
-
-  private async destroy() {
-    try {
-      this.removeAllListeners();
-
-      if (this.ws) {
-        this.ws.removeAllListeners();
-        this.ws.destroy();
-      }
-
-      this.rest.clearTimeout();
-
-      this.guilds.cache.clear();
-      this.channels.cache.clear();
-      this.users.cache.clear();
-
-      this.stopHeartbeat();
-      this.stopConnectionMonitor();
-
-    } catch (error) {
-      this.log(`Error during cleanup: ${error}`, 'error');
-    }
-  }
 }
 
 export const client = new DiscordBot();
 
 export async function startBot(): Promise<DiscordBot> {
   try {
-    // Verify token exists
     if (!process.env.DISCORD_TOKEN) {
       throw new Error('DISCORD_TOKEN is not set in environment variables');
     }
