@@ -119,29 +119,43 @@ export const ContractCommands = [
         }
 
         // Create or get player
-        let player = await db.select({
-          id: players.id,
-          username: players.username,
-          welcome_message_sent: players.welcomeMessageSent,
-        })
-        .from(players)
-        .where(eq(players.discordId, user.id))
-        .then(rows => rows[0]);
+        let player = await db.query.players.findFirst({
+          where: eq(players.discordId, user.id),
+          columns: {
+            id: true,
+            username: true,
+            welcomeMessageSent: true,
+          },
+        });
 
         if (!player) {
-          const result = await db.insert(players).values({
-            discord_id: user.id,
-            username: user.username,
-            welcome_message_sent: false
-          }).returning();
-          player = result[0];
+          // Create new player with required fields
+          const [newPlayer] = await db.insert(players)
+            .values({
+              discordId: user.id,
+              username: user.username,
+              welcomeMessageSent: false,
+              status: 'free_agent',
+              salaryExempt: false,
+            })
+            .returning({
+              id: players.id,
+              username: players.username,
+              welcomeMessageSent: players.welcomeMessageSent,
+            });
+
+          player = newPlayer;
+        }
+
+        if (!player) {
+          return interaction.editReply('Failed to create or find player record');
         }
 
         // Send welcome message to new players
-        if (!player.welcome_message_sent) {
+        if (!player.welcomeMessageSent) {
           await sendWelcomeMessage(user, teamRole);
           await db.update(players)
-            .set({ welcome_message_sent: true })
+            .set({ welcomeMessageSent: true })
             .where(eq(players.id, player.id));
         }
 
@@ -152,19 +166,25 @@ export const ContractCommands = [
         endDate.setDate(endDate.getDate() + length);
         expirationDate.setHours(expirationDate.getHours() + 24);
 
-        const contract = await db.insert(contracts).values({
-          player_id: player.id,
-          team_id: team.id,
-          salary,
-          length_in_days: length,
-          start_date: startDate,
-          end_date: endDate,
-          status: 'pending',
-          metadata: JSON.stringify({
-            expiresAt: expirationDate.toISOString(),
-            offerMessageId: '', // Will be updated after sending the message
-          }),
-        }).returning();
+        const [contract] = await db.insert(contracts)
+          .values({
+            playerId: player.id,
+            teamId: team.id,
+            salary,
+            lengthInDays: length,
+            startDate,
+            endDate,
+            status: 'pending',
+            metadata: JSON.stringify({
+              expiresAt: expirationDate.toISOString(),
+              offerMessageId: '', // Will be updated after sending the message
+            }),
+          })
+          .returning();
+
+        if (!contract) {
+          return interaction.editReply('Failed to create contract offer');
+        }
 
         // Create embed for contract offer
         const embed = new EmbedBuilder()
@@ -208,7 +228,7 @@ export const ContractCommands = [
             replyMessage.react('❌'),
           ]);
 
-          if ('id' in replyMessage && contract[0]) {
+          if ('id' in replyMessage) {
             await db.update(contracts)
               .set({
                 metadata: JSON.stringify({
@@ -216,7 +236,7 @@ export const ContractCommands = [
                   offerMessageId: replyMessage.id,
                 }),
               })
-              .where(eq(contracts.id, contract[0].id));
+              .where(eq(contracts.id, contract.id));
           }
         }
 
