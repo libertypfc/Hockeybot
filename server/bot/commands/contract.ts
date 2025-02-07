@@ -61,21 +61,28 @@ export const ContractCommands = [
           .addIntegerOption(option =>
             option.setName('length')
               .setDescription('Contract length in weeks')
-              .setRequired(true))),
+              .setRequired(true)
+              .setMinValue(1)
+              .setMaxValue(52))),
+
     async execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
 
       try {
         const subcommand = interaction.options.getSubcommand();
-        const user = interaction.options.getUser('player', true);
-        const teamRole = interaction.options.getRole('team', true);
+        const user = interaction.options.getUser('player');
+        const teamRole = interaction.options.getRole('team');
+
+        if (!user || !teamRole) {
+          return interaction.editReply('Both player and team are required');
+        }
 
         // Validate team exists and has cap space
         const team = await db.select({
           id: teams.id,
           name: teams.name,
-          salaryCap: teams.salaryCap,
-          availableCap: teams.availableCap,
+          salary_cap: teams.salary_cap,
+          available_cap: teams.available_cap,
         })
         .from(teams)
         .where(eq(teams.name, teamRole.name))
@@ -96,17 +103,17 @@ export const ContractCommands = [
           title = 'Entry Level Contract Offer';
           lengthDisplay = '30 weeks';
         } else {
-          // Convert input from millions to actual dollars
-          const salaryInMillions = interaction.options.getInteger('salary', true);
-          salary = salaryInMillions * 1_000_000;
-          // Convert weeks to days for storage
-          const weeks = interaction.options.getInteger('length', true);
-          length = weeks * 7;
+          // Custom contract
+          const salaryInput = interaction.options.getInteger('salary', true);
+          const weeksInput = interaction.options.getInteger('length', true);
+
+          salary = salaryInput * 1_000_000; // Convert millions to actual dollars
+          length = weeksInput * 7; // Convert weeks to days
           title = 'Contract Offer';
-          lengthDisplay = `${weeks} week${weeks !== 1 ? 's' : ''}`;
+          lengthDisplay = `${weeksInput} week${weeksInput !== 1 ? 's' : ''}`;
         }
 
-        const availableCap = team.availableCap ?? 0;
+        const availableCap = team.available_cap ?? 0;
         if (availableCap < salary) {
           return interaction.editReply('Team does not have enough cap space');
         }
@@ -115,7 +122,7 @@ export const ContractCommands = [
         let player = await db.select({
           id: players.id,
           username: players.username,
-          welcomeMessageSent: players.welcomeMessageSent,
+          welcome_message_sent: players.welcomeMessageSent,
         })
         .from(players)
         .where(eq(players.discordId, user.id))
@@ -123,18 +130,18 @@ export const ContractCommands = [
 
         if (!player) {
           const result = await db.insert(players).values({
-            discordId: user.id,
+            discord_id: user.id,
             username: user.username,
-            welcomeMessageSent: false
+            welcome_message_sent: false
           }).returning();
           player = result[0];
         }
 
         // Send welcome message to new players
-        if (!player.welcomeMessageSent) {
+        if (!player.welcome_message_sent) {
           await sendWelcomeMessage(user, teamRole);
           await db.update(players)
-            .set({ welcomeMessageSent: true })
+            .set({ welcome_message_sent: true })
             .where(eq(players.id, player.id));
         }
 
@@ -143,15 +150,15 @@ export const ContractCommands = [
         const endDate = new Date();
         const expirationDate = new Date();
         endDate.setDate(endDate.getDate() + length);
-        expirationDate.setHours(expirationDate.getHours() + 24); // Contract offer expires in 24 hours
+        expirationDate.setHours(expirationDate.getHours() + 24);
 
         const contract = await db.insert(contracts).values({
-          playerId: player.id,
-          teamId: team.id,
+          player_id: player.id,
+          team_id: team.id,
           salary,
-          lengthInDays: length,
-          startDate,
-          endDate,
+          length_in_days: length,
+          start_date: startDate,
+          end_date: endDate,
           status: 'pending',
           metadata: JSON.stringify({
             expiresAt: expirationDate.toISOString(),
@@ -169,7 +176,7 @@ export const ContractCommands = [
           )
           .setFooter({ text: '✅ to accept, ❌ to decline' });
 
-        // First send a direct notification to the player
+        // Send DM notification to player
         try {
           const dmEmbed = new EmbedBuilder()
             .setTitle('🏒 New Contract Offer!')
@@ -196,13 +203,11 @@ export const ContractCommands = [
         });
 
         if ('react' in replyMessage) {
-          // Add reactions immediately
           await Promise.all([
             replyMessage.react('✅'),
             replyMessage.react('❌'),
           ]);
 
-          // Update the contract with the message ID for future reference
           if ('id' in replyMessage && contract[0]) {
             await db.update(contracts)
               .set({
