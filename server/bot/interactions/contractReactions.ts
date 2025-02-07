@@ -22,9 +22,11 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
     // Fetch the full message if needed
     const message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
 
-    // Find contract with this message ID
+    console.log('Processing reaction for message:', message.id);
+
+    // Find contract with this message ID using JSON casting
     const contract = await db.query.contracts.findFirst({
-      where: sql`${contracts.metadata}->>'offerMessageId' = ${message.id}`,
+      where: sql`CAST(${contracts.metadata}->>'offerMessageId' AS TEXT) = ${message.id}`,
       with: {
         player: true,
         team: true,
@@ -36,16 +38,20 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
       return;
     }
 
+    console.log('Found contract:', contract.id, 'for player:', contract.player.username);
+
     // Parse metadata
     const metadata = JSON.parse(contract.metadata || '{}') as ContractMetadata;
 
     // Verify the user reacting is the player who received the offer
     if (contract.player.discordId !== user.id) {
+      console.log('User', user.id, 'is not the contract recipient');
       await reaction.users.remove(user);
       return;
     }
 
     if (reaction.emoji.name === '✅') {
+      console.log('Processing contract acceptance');
       // Accept contract
       await db.update(contracts)
         .set({
@@ -99,9 +105,11 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
 
           if (teamRole) {
             await member.roles.add(teamRole);
+            console.log('Added team role to player');
           }
           if (freeAgentRole) {
             await member.roles.remove(freeAgentRole);
+            console.log('Removed free agent role from player');
           }
         } catch (error) {
           console.error('Error updating roles:', error);
@@ -109,6 +117,7 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
       }
 
     } else if (reaction.emoji.name === '❌') {
+      console.log('Processing contract rejection');
       // Reject contract
       await db.update(contracts)
         .set({
@@ -134,6 +143,7 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
 
     // Remove all reactions after processing
     await message.reactions.removeAll();
+    console.log('Contract reaction processed successfully');
 
   } catch (error) {
     console.error('Error handling contract reaction:', error);
