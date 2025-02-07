@@ -620,3 +620,54 @@ async function checkExpiredContracts() {
     console.error('Error checking expired contracts:', error);
   }
 }
+
+export async function registerCommands(client: Client) {
+  try {
+    const commands = [];
+    for (const module of Object.values(CommandModules)) {
+      if (!Array.isArray(module)) continue;
+
+      const validCommands = module.filter(cmd => {
+        if (!cmd.data || !(cmd.data instanceof SlashCommandBuilder)) {
+          console.warn(`Invalid command found in module, skipping...`);
+          return false;
+        }
+        return true;
+      });
+
+      commands.push(...validCommands.map(cmd => cmd.data.toJSON()));
+    }
+
+    // Get the test guild
+    const testGuild = client.guilds.cache.first();
+    if (!testGuild) {
+      throw new Error('No guild available for command registration');
+    }
+
+    console.log(`Registering ${commands.length} commands...`);
+
+    // First, clear all existing commands
+    await testGuild.commands.set([]);
+    console.log('Cleared existing commands');
+
+    // Then register the new commands
+    const registeredCommands = await testGuild.commands.set(commands);
+    console.log(`Successfully registered ${registeredCommands.size} commands in guild ${testGuild.id}`);
+
+    // Store commands in the client's commands collection
+    client.commands.clear(); // Clear existing commands
+    for (const module of Object.values(CommandModules)) {
+      if (!Array.isArray(module)) continue;
+
+      for (const command of module) {
+        if (!command.data?.name) continue;
+        client.commands.set(command.data.name, command);
+      }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error registering commands:', error);
+    throw error;
+  }
+}

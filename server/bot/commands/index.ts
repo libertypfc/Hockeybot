@@ -8,6 +8,18 @@ import { AdminCommands } from './admin';
 import { SeasonCommands } from './season';
 import { OrganizationCommands } from './organization';
 
+// Export all command modules for use in the bot
+export const CommandModules = {
+  TeamCommands,
+  ContractCommands,
+  WaiversCommands,
+  TradeCommands,
+  DatabaseCommands,
+  AdminCommands,
+  SeasonCommands,
+  OrganizationCommands,
+};
+
 // Track registered command names globally
 const registeredCommands = new Map<string, {
   data: SlashCommandBuilder;
