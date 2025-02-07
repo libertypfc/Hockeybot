@@ -6,6 +6,21 @@ import { teams, players, contracts } from '@db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
+  // Health check endpoint for deployment verification
+  app.get('/health', (_req, res) => {
+    const healthcheck = {
+      uptime: process.uptime(),
+      message: 'OK',
+      timestamp: Date.now()
+    };
+    try {
+      res.send(healthcheck);
+    } catch (error) {
+      healthcheck.message = error instanceof Error ? error.message : 'Error';
+      res.status(503).send(healthcheck);
+    }
+  });
+
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
@@ -186,17 +201,5 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Create HTTP server
-  const httpServer = createServer(app);
-  const port = Number(process.env.PORT) || 3000;
-  httpServer.listen(port, '0.0.0.0', () => {
-    console.log(`Server is running on port ${port}`);
-  });
-
-  // Start the bot but don't wait for it
-  startBot().catch(error => {
-    console.error('Failed to start bot:', error);
-  });
-
-  return httpServer;
+  return createServer(app);
 }
