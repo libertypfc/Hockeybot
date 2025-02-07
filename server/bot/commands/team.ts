@@ -15,14 +15,10 @@ export const TeamCommands = [
       await interaction.deferReply();
 
       try {
-        if (!interaction.guildId) {
-          return interaction.editReply('This command must be run in a guild.');
-        }
-
         // Get all teams from database for the current guild
         const allTeams = await db.select()
           .from(teams)
-          .where(eq(teams.guild_id, interaction.guildId));
+          .where(eq(teams.guild_id, interaction.guildId!));
 
         if (allTeams.length === 0) {
           return interaction.editReply('No teams found in the database for this guild.');
@@ -64,18 +60,20 @@ export const TeamCommands = [
             });
           }
 
+          let errors: string[] = [];
+
           // Get all players before updating
           const teamPlayers = await db.select()
             .from(players)
-            .where(eq(players.currentTeamId, teamId));
+            .where(eq(players.current_team_id, teamId));
 
           // Update players to free agents
           await db.update(players)
             .set({
-              currentTeamId: null,
+              current_team_id: null,
               status: 'free_agent'
             })
-            .where(eq(players.currentTeamId, teamId));
+            .where(eq(players.current_team_id, teamId));
 
           // Assign Free Agent role to all players
           for (const player of teamPlayers) {
@@ -85,8 +83,9 @@ export const TeamCommands = [
           // Delete all contracts
           try {
             await db.delete(contracts)
-              .where(eq(contracts.teamId, teamId));
+              .where(eq(contracts.team_id, teamId));
           } catch (error) {
+            errors.push('Failed to delete contracts');
             console.error('Error deleting contracts:', error);
           }
 
@@ -106,6 +105,7 @@ export const TeamCommands = [
                 await category.delete();
               }
             } catch (error) {
+              errors.push('Failed to delete some Discord channels');
               console.error('Error deleting channels:', error);
             }
 
@@ -115,16 +115,28 @@ export const TeamCommands = [
                 await teamRole.delete();
               }
             } catch (error) {
+              errors.push('Failed to delete team role');
               console.error('Error deleting role:', error);
             }
           }
 
-          // Delete the team
-          await db.delete(teams)
-            .where(eq(teams.id, teamId));
+          // Finally, delete the team
+          try {
+            await db.delete(teams)
+              .where(eq(teams.id, teamId));
+          } catch (error) {
+            errors.push('Failed to delete team from database');
+            console.error('Error deleting team from database:', error);
+            throw error;
+          }
+
+          const successMessage = `Team ${selectedTeam.name} has been deleted.`;
+          const errorMessage = errors.length > 0
+            ? `\nWarning: Some operations failed: ${errors.join(', ')}`
+            : '';
 
           await confirmation.update({
-            content: `Team ${selectedTeam.name} has been deleted successfully.`,
+            content: successMessage + errorMessage,
             components: [],
           });
 
@@ -604,6 +616,7 @@ export const TeamCommands = [
           return teamSelection.update({ content: 'No players found on this team.', components: [] });
         }
 
+
         const playerSelect = new StringSelectMenuBuilder()
           .setCustomId('player-select')
           .setPlaceholder('Select a player')
@@ -615,6 +628,7 @@ export const TeamCommands = [
 
         const playerRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(playerSelect);
         const playerResponse = await teamSelection.update({ content: 'Select a player to exempt', components: [playerRow] });
+
 
         const playerSelection = await playerResponse.awaitMessageComponent({
           filter: i => i.user.id === interaction.user.id,
@@ -751,7 +765,7 @@ export const TeamCommands = [
   },
 ];
 
-// Helper function remains unchanged
+// Helper function for assigning free agent role
 async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, playerId: number) {
   try {
     const player = await db.query.players.findFirst({
@@ -760,7 +774,7 @@ async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, pla
 
     if (!player || !interaction.guild) return;
 
-    const member = await interaction.guild.members.fetch(player.discordId);
+    const member = await interaction.guild.members.fetch(player.discord_id);
     const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === 'Free Agent');
 
     if (freeAgentRole && member) {
