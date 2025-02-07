@@ -14,16 +14,30 @@ const registeredCommands = new Map<string, {
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 }>();
 
-function validateAndRegisterCommand(command: any) {
+function validateAndRegisterCommand(command: any, moduleName: string) {
   if (!command.data || !(command.data instanceof SlashCommandBuilder)) {
-    console.warn(`Skipping invalid command: ${command.data?.name || 'unknown'}`);
+    console.warn(`Skipping invalid command in ${moduleName}: ${command.data?.name || 'unknown'}`);
     return false;
   }
 
   const commandName = command.data.name;
   if (registeredCommands.has(commandName)) {
-    console.warn(`Duplicate command found: ${commandName}, skipping...`);
+    console.warn(`Duplicate command '${commandName}' found in ${moduleName}, skipping...`);
     return false;
+  }
+
+  // Additional validation for subcommands
+  if (command.data.options?.some((opt: any) => opt.type === 1)) { // 1 is SUB_COMMAND type
+    const subcommandNames = new Set<string>();
+    for (const option of command.data.options) {
+      if (option.type === 1) {
+        if (subcommandNames.has(option.name)) {
+          console.warn(`Duplicate subcommand '${option.name}' found in command '${commandName}', skipping entire command...`);
+          return false;
+        }
+        subcommandNames.add(option.name);
+      }
+    }
   }
 
   registeredCommands.set(commandName, command);
@@ -41,7 +55,7 @@ export async function registerCommands(client: Client) {
 
   console.log('Starting command registration process...');
 
-  // Create a Set to track unique command names
+  // Create a Set to track unique command names across all modules
   const uniqueCommandNames = new Set<string>();
 
   // Process all command modules
@@ -64,18 +78,28 @@ export async function registerCommands(client: Client) {
       continue;
     }
 
+    // Filter out duplicate commands within the same module
+    const moduleCommands = new Map<string, any>();
     for (const command of module.commands) {
-      if (!command.data) continue;
+      if (!command.data?.name) continue;
 
-      const commandName = command.data.name;
+      if (moduleCommands.has(command.data.name)) {
+        console.warn(`Duplicate command '${command.data.name}' found within ${module.name} module, keeping first instance...`);
+        continue;
+      }
+      moduleCommands.set(command.data.name, command);
+    }
+
+    // Register filtered commands
+    for (const [commandName, command] of moduleCommands) {
       if (uniqueCommandNames.has(commandName)) {
-        console.warn(`Duplicate command '${commandName}' found in ${module.name} module, skipping...`);
+        console.warn(`Command '${commandName}' already registered by another module, skipping...`);
         continue;
       }
 
-      if (validateAndRegisterCommand(command)) {
+      if (validateAndRegisterCommand(command, module.name)) {
         uniqueCommandNames.add(commandName);
-        console.log(`Registered command: ${commandName}`);
+        console.log(`Registered command: ${commandName} from ${module.name}`);
       }
     }
   }
