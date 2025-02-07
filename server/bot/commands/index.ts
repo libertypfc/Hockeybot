@@ -20,14 +20,20 @@ export const CommandModules = {
   OrganizationCommands,
 };
 
+let hasRegisteredGlobally = false;
+
 export async function registerCommands(client: Client) {
   if (!client.user) {
     throw new Error('Client user is not available');
   }
 
+  if (hasRegisteredGlobally) {
+    console.log('Commands already registered globally, skipping...');
+    return true;
+  }
+
   console.log('Starting command registration process...');
 
-  // Create a REST instance for API calls
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
 
   try {
@@ -66,16 +72,7 @@ export async function registerCommands(client: Client) {
       }
     }
 
-    // Convert commands to Discord API format
-    const commandData = Array.from(uniqueCommands.values()).map(cmd => {
-      const json = cmd.data.toJSON();
-      console.log(`Prepared command for API: ${json.name}`);
-      return json;
-    });
-
-    console.log(`Prepared ${commandData.length} unique commands for registration`);
-
-    // First, clear global commands
+    // First, clear all global commands
     console.log('Clearing global application commands...');
     await rest.put(
       Routes.applicationCommands(client.user.id),
@@ -84,6 +81,15 @@ export async function registerCommands(client: Client) {
 
     // Wait a moment to ensure commands are cleared
     await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Convert commands to Discord API format
+    const commandData = Array.from(uniqueCommands.values()).map(cmd => {
+      const json = cmd.data.toJSON();
+      console.log(`Prepared command for API: ${json.name}`);
+      return json;
+    });
+
+    console.log(`Prepared ${commandData.length} unique commands for registration`);
 
     // Register commands globally
     console.log(`Registering ${commandData.length} commands globally...`);
@@ -98,6 +104,7 @@ export async function registerCommands(client: Client) {
     }
 
     console.log(`Successfully registered ${uniqueCommands.size} unique commands globally`);
+    hasRegisteredGlobally = true;
     return true;
   } catch (error) {
     console.error('Error in command registration:', error);

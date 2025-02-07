@@ -2,7 +2,7 @@ import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChanne
 import { db } from '@db';
 import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
-//import { registerCommands } from './commands'; // Removed - now handled in commands/index.ts
+import { registerCommands } from './commands/index';
 import { checkCapCompliance } from './commands/admin';
 import { initializeAchievements, checkUptimeAchievements } from './achievements';
 
@@ -16,6 +16,7 @@ declare module 'discord.js' {
 }
 
 export class DiscordBot extends Client {
+  private static instance: DiscordBot | null = null;
   private isConnecting: boolean = false;
   private reconnectAttempt: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
@@ -30,6 +31,10 @@ export class DiscordBot extends Client {
   private hasRegisteredCommands: boolean = false;
 
   constructor() {
+    if (DiscordBot.instance) {
+      return DiscordBot.instance;
+    }
+
     super({
       intents: [
         GatewayIntentBits.Guilds,
@@ -52,6 +57,7 @@ export class DiscordBot extends Client {
 
     this.commands = new Collection();
     this.setupEventHandlers();
+    DiscordBot.instance = this;
   }
 
   private log(message: string, level: 'info' | 'error' | 'warn' | 'debug' = 'info') {
@@ -424,32 +430,36 @@ export class DiscordBot extends Client {
         await initializeAchievements();
         this.log('Achievements initialized', 'info');
 
-        //await registerCommands(this); // Removed - now handled in commands/index.ts
+        await registerCommands(this);
         this.log('Commands registered successfully', 'info');
         this.hasRegisteredCommands = true;
+
+        // Start periodic checks after successful initialization
+        this.startPeriodicChecks();
       }
-
-      setInterval(() => {
-        checkExpiredContracts().catch(error =>
-          this.log(`Error checking expired contracts: ${error}`, 'error')
-        );
-      }, 5 * 60 * 1000);
-
-      setInterval(() => {
-        checkCapCompliance(this).catch(error =>
-          this.log(`Error checking cap compliance: ${error}`, 'error')
-        );
-      }, 15 * 60 * 1000);
-
-      setInterval(() => {
-        checkUptimeAchievements(this).catch(error =>
-          this.log(`Error checking uptime achievements: ${error}`, 'error')
-        );
-      }, 60 * 60 * 1000);
-
     } catch (error) {
       this.log(`Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
+  }
+
+  private startPeriodicChecks() {
+    setInterval(() => {
+      checkExpiredContracts().catch(error =>
+        this.log(`Error checking expired contracts: ${error}`, 'error')
+      );
+    }, 5 * 60 * 1000);
+
+    setInterval(() => {
+      checkCapCompliance(this).catch(error =>
+        this.log(`Error checking cap compliance: ${error}`, 'error')
+      );
+    }, 15 * 60 * 1000);
+
+    setInterval(() => {
+      checkUptimeAchievements(this).catch(error =>
+        this.log(`Error checking uptime achievements: ${error}`, 'error')
+      );
+    }, 60 * 60 * 1000);
   }
 
   private handleDisconnect() {
