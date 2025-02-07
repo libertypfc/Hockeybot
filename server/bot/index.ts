@@ -122,7 +122,7 @@ export async function startBot(): Promise<Client> {
         try {
           // Check if guild already has data
           const existingTeams = await db.query.teams.findMany({
-            where: eq(teams.guild_id, guild.id)
+            where: eq(teams.guildId, guild.id)
           });
 
           if (existingTeams.length === 0) {
@@ -131,26 +131,26 @@ export async function startBot(): Promise<Client> {
             // Clear any existing data for this guild
             const guildId = guild.id;
             await Promise.all([
-              db.delete(contracts).where(eq(contracts.guild_id, guildId)),
-              db.delete(waivers).where(eq(waivers.guild_id, guildId)),
-              db.delete(players).where(eq(players.guild_id, guildId)),
-              db.delete(teams).where(eq(teams.guild_id, guildId))
+              db.delete(contracts).where(eq(contracts.guildId, guildId)),
+              db.delete(waivers).where(eq(waivers.guildId, guildId)),
+              db.delete(players).where(eq(players.guildId, guildId)),
+              db.delete(teams).where(eq(teams.guildId, guildId))
             ]);
+          }
 
-            // Register slash commands for the new guild
-            try {
-              const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
-              const commands = Array.from(client.commands.values()).map(cmd => cmd.data.toJSON());
+          // Register slash commands for the new guild
+          try {
+            const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
+            const commands = Array.from(client.commands.values()).map(cmd => cmd.data.toJSON());
 
-              await rest.put(
-                Routes.applicationGuildCommands(client.user!.id, guild.id),
-                { body: commands }
-              );
+            await rest.put(
+              Routes.applicationGuildCommands(client.user!.id, guild.id),
+              { body: commands }
+            );
 
-              console.log(`Successfully registered commands for guild: ${guild.name}`);
-            } catch (error) {
-              console.error(`Failed to register commands for guild ${guild.name}:`, error);
-            }
+            console.log(`Successfully registered commands for new guild: ${guild.name}`);
+          } catch (error) {
+            console.error(`Failed to register commands for guild ${guild.name}:`, error);
           }
         } catch (error) {
           console.error(`Error initializing database for guild ${guild.name}:`, error);

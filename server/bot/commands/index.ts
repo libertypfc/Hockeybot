@@ -26,20 +26,11 @@ export async function registerCommands(client: Client) {
 
   console.log('Starting command registration...');
 
-  // Get the first guild the bot is in
+  // Get all guilds the bot is in
   const guilds = await client.guilds.fetch();
   if (guilds.size === 0) {
     throw new Error('Bot is not in any guilds');
   }
-
-  // Use the first guild's ID
-  const firstGuild = guilds.first();
-  if (!firstGuild) {
-    throw new Error('Failed to get first guild');
-  }
-
-  const guildId = firstGuild.id;
-  console.log(`Using guild ID: ${guildId}`);
 
   const token = process.env.DISCORD_TOKEN;
   if (!token) {
@@ -81,14 +72,20 @@ export async function registerCommands(client: Client) {
       }
     }
 
-    // Register commands with Discord
-    const data = await rest.put(
-      Routes.applicationGuildCommands(client.user.id, guildId),
-      { body: commands }
-    );
+    // Register commands for each guild
+    for (const [guildId, guild] of guilds) {
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(client.user.id, guildId),
+          { body: commands }
+        );
+        console.log(`Registered ${commands.length} commands in guild ${guild.name} (${guildId})`);
+      } catch (error) {
+        console.error(`Error registering commands for guild ${guild.name} (${guildId}):`, error);
+      }
+    }
 
     console.log('Successfully reloaded application (/) commands.');
-    console.log(`Registered ${commands.length} commands in guild ${guildId}`);
     return true;
   } catch (error) {
     console.error('Error registering commands:', error);
@@ -101,7 +98,7 @@ export async function registerCommands(client: Client) {
       if (error.message.includes('Missing Access')) {
         throw new Error('Bot lacks permissions to create commands. Ensure bot has "applications.commands" scope');
       } else if (error.message.includes('Unknown Guild')) {
-        throw new Error(`Bot is not in the specified guild (ID: ${guildId})`);
+        throw new Error(`Bot is not in the specified guild`);
       }
     }
     throw error;
