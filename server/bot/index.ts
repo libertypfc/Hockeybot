@@ -52,7 +52,12 @@ export class DiscordBot extends Client {
           name: 'Hockey League',
           type: 0
         }]
-      }
+      },
+      failIfNotExists: false,
+      retryLimit: 5,
+      restWsBridgeTimeout: 5000,
+      restRequestTimeout: 30000,
+      waitGuildTimeout: 15000
     });
 
     this.commands = new Collection();
@@ -503,6 +508,11 @@ export class DiscordBot extends Client {
       this.stopHeartbeat();
       this.stopConnectionMonitor();
 
+      // Clear any existing state
+      this.commands = new Collection();
+      this.removeAllListeners();
+      this.setupEventHandlers();
+
       await Promise.race([
         this.login(process.env.DISCORD_TOKEN),
         new Promise((_, reject) =>
@@ -523,6 +533,7 @@ export class DiscordBot extends Client {
 
       this.log('Connection established successfully', 'info');
       this.isConnecting = false;
+      this.reconnectAttempt = 0;
       return true;
 
     } catch (error) {
@@ -531,6 +542,7 @@ export class DiscordBot extends Client {
       if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
         this.reconnectAttempt++;
         this.isConnecting = false;
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Add delay between retries
         return this.start();
       }
 
