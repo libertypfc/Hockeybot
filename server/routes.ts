@@ -11,7 +11,7 @@ export function registerRoutes(app: Express): Server {
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
-      // Check if client exists and is ready
+      // Check if client exists and connection state
       if (!client) {
         return res.status(503).json({
           error: 'Discord connection unavailable',
@@ -19,10 +19,25 @@ export function registerRoutes(app: Express): Server {
         });
       }
 
-      if (!client.isReady()) {
+      // Check connection state
+      if (client.connectionState === 'error') {
+        return res.status(503).json({
+          error: 'Discord connection error',
+          details: 'The Discord bot encountered a connection error. Please check the bot token and try again.'
+        });
+      }
+
+      if (client.connectionState === 'connecting') {
+        return res.status(503).json({
+          error: 'Discord connection in progress',
+          details: 'The Discord bot is currently connecting. Please try again in a few moments.'
+        });
+      }
+
+      if (client.connectionState !== 'connected' || !client.isReady()) {
         return res.status(503).json({
           error: 'Discord connection unavailable',
-          details: 'The Discord bot is still initializing. Please try again in a few moments.'
+          details: 'The Discord bot is not ready. Please try again in a few moments.'
         });
       }
 
@@ -32,7 +47,7 @@ export function registerRoutes(app: Express): Server {
         const servers = Array.from(guilds.values()).map(guild => ({
           id: guild.id,
           name: guild.name,
-          memberCount: guild.memberCount || 0
+          memberCount: guild.approximateMemberCount || 0
         }));
 
         if (servers.length === 0) {
