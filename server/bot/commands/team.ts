@@ -14,9 +14,9 @@ export const TeamCommands = [
     async execute(interaction: ChatInputCommandInteraction) {
       try {
         // Get all teams from database for the current guild
-        const allTeams = await db.query.teams.findMany({
-          where: eq(teams.guildId, interaction.guildId)
-        });
+        const allTeams = await db.select()
+          .from(teams)
+          .where(eq(teams.guild_id, interaction.guildId));
 
         if (allTeams.length === 0) {
           return interaction.reply('No teams found in the database for this guild.');
@@ -123,7 +123,8 @@ export const TeamCommands = [
 
         // Finally, delete the team
         try {
-          await db.delete(teams).where(eq(teams.id, teamId));
+          await db.delete(teams)
+            .where(eq(teams.id, teamId));
         } catch (error) {
           errors.push('Failed to delete team from database');
           console.error('Error deleting team from database:', error);
@@ -190,21 +191,21 @@ export const TeamCommands = [
         const teamPlayers = await db.select({
           id: players.id,
           username: players.username,
-          discordId: players.discordId,
-          salaryExempt: players.salaryExempt,
+          discordId: players.discord_id,
+          salaryExempt: players.salary_exempt,
         })
           .from(players)
-          .where(eq(players.currentTeamId, team.id));
+          .where(eq(players.current_team_id, team.id));
 
         // Get active contracts for the team
         const activeContracts = await db.select({
-          playerId: contracts.playerId,
+          playerId: contracts.player_id,
           salary: contracts.salary,
         })
           .from(contracts)
           .where(
             and(
-              eq(contracts.teamId, team.id),
+              eq(contracts.team_id, team.id),
               eq(contracts.status, 'active')
             )
           );
@@ -492,26 +493,26 @@ export const TeamCommands = [
 
         // Find player in database
         const player = await db.query.players.findFirst({
-          where: eq(players.discordId, user.id),
+          where: eq(players.discord_id, user.id),
         });
 
         if (!player) {
           return interaction.editReply('Player not found in the database.');
         }
 
-        if (!player.currentTeamId) {
+        if (!player.current_team_id) {
           return interaction.editReply('This player is not currently on a team.');
         }
 
         // Get current team info for the message
         const team = await db.query.teams.findFirst({
-          where: eq(teams.id, player.currentTeamId),
+          where: eq(teams.id, player.current_team_id),
         });
 
         // Update player status to free agent and remove team
         await db.update(players)
           .set({
-            currentTeamId: null,
+            current_team_id: null,
             status: 'free_agent'
           })
           .where(eq(players.id, player.id));
@@ -520,10 +521,10 @@ export const TeamCommands = [
         await db.update(contracts)
           .set({
             status: 'terminated',
-            endDate: new Date()
+            end_date: new Date()
           })
           .where(and(
-            eq(contracts.playerId, player.id),
+            eq(contracts.player_id, player.id),
             eq(contracts.status, 'active')
           ));
 
@@ -582,7 +583,7 @@ export const TeamCommands = [
               where: eq(players.status, 'signed'),
             },
           },
-          where: eq(teams.guildId, guildId)
+          where: eq(teams.guild_id, guildId)
         });
 
         if (allTeams.length === 0) {
@@ -619,7 +620,7 @@ export const TeamCommands = [
 
         const teamPlayers = await db.query.players.findMany({
           where: and(
-            eq(players.currentTeamId, selectedTeamId),
+            eq(players.current_team_id, selectedTeamId),
             eq(players.status, 'signed')
           ),
         });
@@ -655,7 +656,7 @@ export const TeamCommands = [
           return playerSelection.update({ content: 'Selected player not found.', components: [] });
         }
 
-        await db.update(players).set({ salaryExempt: true }).where(eq(players.id, selectedPlayerId));
+        await db.update(players).set({ salary_exempt: true }).where(eq(players.id, selectedPlayerId));
 
         await playerSelection.update({ content: `${selectedPlayer.username} is now salary cap exempt.`, components: [] });
 
@@ -692,26 +693,26 @@ export const TeamCommands = [
 
         // Find player in database
         const player = await db.query.players.findFirst({
-          where: eq(players.discordId, user.id),
+          where: eq(players.discord_id, user.id),
         });
 
         if (!player) {
           return interaction.editReply('Player not found in the database.');
         }
 
-        if (!player.currentTeamId) {
+        if (!player.current_team_id) {
           return interaction.editReply('This player is not currently on a team.');
         }
 
         // Get current team info for the message
         const team = await db.query.teams.findFirst({
-          where: eq(teams.id, player.currentTeamId),
+          where: eq(teams.id, player.current_team_id),
         });
 
         // Update player status to free agent and remove team
         await db.update(players)
           .set({
-            currentTeamId: null,
+            current_team_id: null,
             status: 'free_agent'
           })
           .where(eq(players.id, player.id));
@@ -720,10 +721,10 @@ export const TeamCommands = [
         await db.update(contracts)
           .set({
             status: 'terminated',
-            endDate: new Date()
+            end_date: new Date()
           })
           .where(and(
-            eq(contracts.playerId, player.id),
+            eq(contracts.player_id, player.id),
             eq(contracts.status, 'active')
           ));
 
@@ -789,7 +790,7 @@ async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, pla
 
     if (!player || !interaction.guild) return;
 
-    const member = await interaction.guild.members.fetch(player.discordId);
+    const member = await interaction.guild.members.fetch(player.discord_id);
     const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === 'Free Agent');
 
     if (freeAgentRole && member) {
