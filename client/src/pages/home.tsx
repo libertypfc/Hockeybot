@@ -30,14 +30,20 @@ export default function Home() {
   const [selectedServer, setSelectedServer] = useState<string>("");
 
   // Fetch available servers
-  const { data: servers = [], isLoading: serversLoading } = useQuery<Server[]>({
+  const { data: servers = [], isLoading: serversLoading, error: serversError } = useQuery<Server[]>({
     queryKey: ['/api/servers'],
-    queryFn: () => fetch('/api/servers').then(res => res.json()),
+    queryFn: async () => {
+      const response = await fetch('/api/servers');
+      if (!response.ok) {
+        throw new Error('Failed to fetch servers');
+      }
+      return response.json();
+    },
   });
 
   // Set initial server when data is loaded
   useEffect(() => {
-    if (servers.length > 0 && !selectedServer) {
+    if (servers && servers.length > 0 && !selectedServer) {
       setSelectedServer(servers[0].id);
     }
   }, [servers]);
@@ -45,11 +51,14 @@ export default function Home() {
   const { data: teams, isLoading: teamsLoading, error: teamsError } = useQuery<Team[]>({
     queryKey: ['/api/teams', selectedServer],
     enabled: !!selectedServer,
-    queryFn: () => fetch(`/api/teams?guildId=${selectedServer}`).then(res => res.json()),
+    queryFn: async () => {
+      const response = await fetch(`/api/teams?guildId=${selectedServer}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch teams');
+      }
+      return response.json();
+    },
   });
-
-  console.log('Selected Server:', selectedServer);
-  console.log('Teams:', teams);
 
   return (
     <div className="min-h-screen w-full p-8 bg-gray-50">
@@ -64,9 +73,11 @@ export default function Home() {
         </div>
 
         <div className="w-full max-w-xs">
-          {serversLoading ? (
-            <p>Loading servers...</p>
-          ) : (
+          {serversError ? (
+            <p className="text-red-600">Error loading servers: {serversError instanceof Error ? serversError.message : 'Unknown error'}</p>
+          ) : serversLoading ? (
+            <p className="text-gray-600">Loading servers...</p>
+          ) : servers && servers.length > 0 ? (
             <Select
               value={selectedServer}
               onValueChange={setSelectedServer}
@@ -82,6 +93,8 @@ export default function Home() {
                 ))}
               </SelectContent>
             </Select>
+          ) : (
+            <p className="text-gray-600">No servers available</p>
           )}
         </div>
 
@@ -100,7 +113,7 @@ export default function Home() {
                 ) : teamsLoading ? (
                   <p className="text-gray-600">Loading team information...</p>
                 ) : teamsError ? (
-                  <p className="text-red-600">Error loading team information. Please try again later.</p>
+                  <p className="text-red-600">Error loading team information: {teamsError instanceof Error ? teamsError.message : 'Unknown error'}</p>
                 ) : teams && teams.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {teams.map(team => (
@@ -114,7 +127,7 @@ export default function Home() {
                             <li>Total Salary: ${team.totalSalary?.toLocaleString()}</li>
                             <li className="mt-2">
                               <span className="font-medium">Salary Exempt Players:</span>
-                              {team.exemptPlayers.length > 0 ? (
+                              {team.exemptPlayers?.length > 0 ? (
                                 <ul className="ml-4 list-disc">
                                   {team.exemptPlayers.map(player => (
                                     <li key={player.discordId}>{player.username}</li>

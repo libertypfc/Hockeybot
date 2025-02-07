@@ -29,23 +29,27 @@ export function ExemptionManager({ serverId }: ExemptionManagerProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: teams, isLoading: teamsLoading } = useQuery<Team[]>({
+  const { data: teams, isLoading: teamsLoading, error: teamsError } = useQuery<Team[]>({
     queryKey: ['/api/teams', serverId],
-    queryFn: () => fetch(`/api/teams?guildId=${serverId}`).then(res => res.json()),
+    queryFn: async () => {
+      const response = await fetch(`/api/teams?guildId=${serverId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch teams');
+      }
+      return response.json();
+    },
     enabled: !!serverId,
   });
 
   const { data: roster, isLoading: rosterLoading, error: rosterError } = useQuery<Player[]>({
     queryKey: ['/api/teams', selectedTeamId, 'roster'],
     queryFn: async () => {
-      console.log('Fetching roster for team:', selectedTeamId);
+      if (!selectedTeamId) throw new Error('No team selected');
       const response = await fetch(`/api/teams/${selectedTeamId}/roster`);
       if (!response.ok) {
         throw new Error('Failed to fetch roster');
       }
-      const data = await response.json();
-      console.log('Roster data received:', data);
-      return data;
+      return response.json();
     },
     enabled: !!selectedTeamId,
   });
@@ -53,7 +57,11 @@ export function ExemptionManager({ serverId }: ExemptionManagerProps) {
   const toggleExemption = useMutation({
     mutationFn: async (playerId: number) => {
       if (!selectedTeamId) throw new Error("No team selected");
-      await apiRequest('POST', `/api/teams/${selectedTeamId}/exempt/${playerId}`);
+      const response = await apiRequest('POST', `/api/teams/${selectedTeamId}/exempt/${playerId}`);
+      if (!response.ok) {
+        throw new Error('Failed to update exemption status');
+      }
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/teams', selectedTeamId, 'roster'] });
@@ -73,17 +81,22 @@ export function ExemptionManager({ serverId }: ExemptionManagerProps) {
   });
 
   const handleTeamSelect = (value: string) => {
-    console.log('Team selected:', value);
     setSelectedTeamId(value);
   };
 
-  if (rosterError) {
-    console.error('Roster error:', rosterError);
-    toast({
-      title: "Error",
-      description: "Failed to load team roster. Please try again.",
-      variant: "destructive",
-    });
+  if (teamsError) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Manage Salary Exemptions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-red-600">
+            Error loading teams: {teamsError instanceof Error ? teamsError.message : 'Unknown error'}
+          </p>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -104,11 +117,15 @@ export function ExemptionManager({ serverId }: ExemptionManagerProps) {
             <SelectContent>
               {teamsLoading ? (
                 <SelectItem value="loading" disabled>Loading teams...</SelectItem>
-              ) : teams?.map((team) => (
-                <SelectItem key={team.id} value={team.id.toString()}>
-                  {team.name}
-                </SelectItem>
-              ))}
+              ) : teams && teams.length > 0 ? (
+                teams.map((team) => (
+                  <SelectItem key={team.id} value={team.id.toString()}>
+                    {team.name}
+                  </SelectItem>
+                ))
+              ) : (
+                <SelectItem value="no-teams" disabled>No teams available</SelectItem>
+              )}
             </SelectContent>
           </Select>
         </div>
@@ -122,6 +139,10 @@ export function ExemptionManager({ serverId }: ExemptionManagerProps) {
                 <Skeleton className="h-12 w-full" />
                 <Skeleton className="h-12 w-full" />
               </div>
+            ) : rosterError ? (
+              <p className="text-red-600">
+                Error loading roster: {rosterError instanceof Error ? rosterError.message : 'Unknown error'}
+              </p>
             ) : roster && roster.length > 0 ? (
               <div className="grid gap-2">
                 {roster.map((player) => (

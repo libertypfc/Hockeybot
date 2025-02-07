@@ -353,8 +353,8 @@ export class DiscordBot extends Client {
       }
 
       // Validate token format
-      if (!token.startsWith('MTA') && !token.startsWith('MTI')) {
-        throw new Error('Invalid Discord bot token format. Token should start with MTA or MTI');
+      if (!token.startsWith('MTA') && !token.startsWith('MTI') && !token.startsWith('MTM')) {
+        throw new Error('Invalid Discord bot token format. Token should start with MTA, MTI, or MTM');
       }
 
       if (token.length < 50) {
@@ -363,21 +363,28 @@ export class DiscordBot extends Client {
 
       this.log(`Connection attempt ${this.reconnectAttempt + 1}/${this.MAX_RECONNECT_ATTEMPTS}`);
       this.log('Validating token format...', 'debug');
+      this.log(`Token prefix: ${token.substring(0, 3)}`, 'debug');
+      this.log(`Token length: ${token.length}`, 'debug');
 
       this.cleanup();
       this.commands = new Collection();
       this.setupEventHandlers();
 
       try {
+        this.log('Attempting to login with token...', 'debug');
         await this.login(token);
         this.log('Login successful', 'info');
       } catch (loginError) {
         if (loginError instanceof Error) {
+          this.log(`Login error details: ${loginError.message}`, 'error');
+
           // Provide more specific error messages based on the error
           if (loginError.message.includes('invalid token')) {
-            throw new Error('Discord rejected the token. Please verify the token is correct and not expired');
+            throw new Error('Discord rejected the token. Please verify the token is correct and not expired. Error: ' + loginError.message);
           } else if (loginError.message.includes('disallowed intents')) {
-            throw new Error('Bot token valid but missing required privileged intents. Enable them in Discord Developer Portal');
+            throw new Error('Bot token valid but missing required privileged intents. Enable them in Discord Developer Portal. Error: ' + loginError.message);
+          } else if (loginError.message.includes('Unknown')) {
+            throw new Error('Discord API could not recognize the token. Please ensure you\'re using the correct token from your application\'s Bot page. Error: ' + loginError.message);
           }
           throw loginError;
         }
@@ -397,7 +404,9 @@ export class DiscordBot extends Client {
       if (this.reconnectAttempt < this.MAX_RECONNECT_ATTEMPTS) {
         this.reconnectAttempt++;
         this.isConnecting = false;
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        const backoffTime = Math.min(5000 * Math.pow(2, this.reconnectAttempt), 30000);
+        this.log(`Waiting ${backoffTime}ms before retry...`, 'info');
+        await new Promise(resolve => setTimeout(resolve, backoffTime));
         return this.start();
       }
 
