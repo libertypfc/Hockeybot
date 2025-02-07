@@ -47,7 +47,7 @@ export const DatabaseCommands = [
       .addSubcommand(subcommand =>
         subcommand
           .setName('addplayer')
-          .setDescription('Add a player with contract to team')
+          .setDescription('Add a player with custom contract to team')
           .addUserOption(option =>
             option.setName('player')
               .setDescription('The player to add')
@@ -59,6 +59,19 @@ export const DatabaseCommands = [
           .addIntegerOption(option =>
             option.setName('salary')
               .setDescription('Player salary')
+              .setRequired(true))
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('addelc')
+          .setDescription('Add a player with Entry Level Contract to team')
+          .addUserOption(option =>
+            option.setName('player')
+              .setDescription('The player to add')
+              .setRequired(true))
+          .addRoleOption(option =>
+            option.setName('team')
+              .setDescription('The team to add player to')
               .setRequired(true))
       )
       .addSubcommand(subcommand =>
@@ -197,6 +210,72 @@ export const DatabaseCommands = [
 
             await interaction.editReply(
               `Added ${user.username} to ${team.name} with $${salary}M salary`
+            );
+            break;
+          }
+
+          case 'addelc': {
+            const user = interaction.options.getUser('player', true);
+            const teamRole = interaction.options.getRole('team', true);
+            const salary = 925000; // Fixed ELC salary
+            const lengthInDays = 210; // 30 weeks
+
+            // Get team
+            const team = await db.query.teams.findFirst({
+              where: eq(teams.name, teamRole.name),
+            });
+
+            if (!team) {
+              return interaction.editReply('Team not found in database');
+            }
+
+            // Create or get player
+            let player = await db.query.players.findFirst({
+              where: eq(players.discordId, user.id),
+            });
+
+            if (!player) {
+              const [newPlayer] = await db.insert(players)
+                .values({
+                  discordId: user.id,
+                  username: user.username,
+                  currentTeamId: team.id,
+                  status: 'signed',
+                  salaryExempt: false,
+                  welcomeMessageSent: true,
+                })
+                .returning();
+              player = newPlayer;
+            } else {
+              await db.update(players)
+                .set({
+                  currentTeamId: team.id,
+                  status: 'signed'
+                })
+                .where(eq(players.id, player.id));
+            }
+
+            // Create ELC contract
+            const startDate = new Date();
+            const endDate = new Date();
+            endDate.setDate(endDate.getDate() + lengthInDays);
+
+            await db.insert(contracts)
+              .values({
+                playerId: player.id,
+                teamId: team.id,
+                salary,
+                lengthInDays,
+                startDate,
+                endDate,
+                status: 'active',
+                metadata: JSON.stringify({
+                  type: 'ELC'
+                }),
+              });
+
+            await interaction.editReply(
+              `Added ${user.username} to ${team.name} with Entry Level Contract ($925,000)`
             );
             break;
           }
