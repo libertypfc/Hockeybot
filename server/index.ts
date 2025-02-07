@@ -13,27 +13,11 @@ app.use(express.urlencoded({ extended: false }));
 // Request logging middleware
 app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  log(`${req.method} ${req.path} started`, 'request');
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-      log(logLine);
-    }
+    log(`${req.method} ${req.path} ${res.statusCode} completed in ${duration}ms`, 'request');
   });
 
   next();
@@ -49,34 +33,28 @@ async function startApplication() {
   try {
     // Validate configuration
     validateConfig();
+    log('Configuration validated successfully', 'startup');
 
     // Create and configure HTTP server
     const httpServer = createServer(app);
     registerRoutes(app);
+    log('Routes registered successfully', 'startup');
 
-    // Error handling middleware
-    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      const status = err.status || err.statusCode || 500;
-      const message = err.message || "Internal Server Error";
-      log(`Error: ${message}`, 'error');
-      res.status(status).json({ message });
-    });
-
-    // Setup Vite for development or serve static files for production
+    // Setup Vite or static files based on environment
     if (CONFIG.NODE_ENV === "development") {
       try {
         await setupVite(app, httpServer);
+        log('Vite middleware setup complete', 'startup');
       } catch (error) {
         console.error("Failed to setup Vite:", error);
-        // Continue even if Vite setup fails in development
       }
     } else {
-      // For production, serve static files from the dist/public directory
       const distPath = path.resolve(process.cwd(), "dist/public");
       app.use(express.static(distPath));
       app.get('*', (_req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
       });
+      log('Static file serving configured', 'startup');
     }
 
     // Start HTTP server with proper error handling
@@ -101,13 +79,11 @@ async function startApplication() {
 
     // Initialize Discord bot after server is running
     if (CONFIG.DISCORD_TOKEN) {
-      log('Starting Discord bot...', 'startup');
       try {
         await startBot();
         log('Discord bot started successfully', 'startup');
       } catch (error) {
         log(`Warning: Failed to start Discord bot: ${error}`, 'startup');
-        // Don't fail the application if Discord bot fails to start
         if (error instanceof Error && error.message.includes('Invalid Discord token')) {
           log('Please check your Discord token configuration', 'startup');
         }
