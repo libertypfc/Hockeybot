@@ -1,8 +1,8 @@
-import { SlashCommandBuilder, ChannelType, PermissionFlagsBits, ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
-import { eq, and, sql } from 'drizzle-orm';
-import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder, ComponentType } from 'discord.js';
+import { eq, and } from 'drizzle-orm';
+import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder } from 'discord.js';
 
 export const TeamCommands = [
   {
@@ -168,18 +168,18 @@ export const TeamCommands = [
         }
 
         // Get team information
-        const team = await db.select({
-          id: teams.id,
-          name: teams.name,
-          salary_cap: teams.salary_cap,
-          available_cap: teams.available_cap,
-        })
-          .from(teams)
-          .where(and(
+        const team = await db.query.teams.findFirst({
+          where: and(
             eq(teams.name, teamRole.name),
-            eq(teams.guild_id, guildId)
-          ))
-          .then(rows => rows[0]);
+            eq(teams.guildId, guildId)
+          ),
+          columns: {
+            id: true,
+            name: true,
+            salaryCap: true,
+            availableCap: true,
+          },
+        });
 
         if (!team) {
           return interaction.editReply('Team not found in database for this guild');
@@ -187,33 +187,34 @@ export const TeamCommands = [
 
         // Get all players on the team with their active contracts
         const teamPlayers = await db.query.players.findMany({
-          where: eq(players.current_team_id, team.id),
+          where: eq(players.currentTeamId, team.id),
           columns: {
             id: true,
             username: true,
-            discord_id: true,
-            salary_exempt: true,
+            discordId: true,
+            salaryExempt: true,
           },
         });
 
         // Get active contracts for the team
-        const activeContracts = await db.select({
-          player_id: contracts.player_id,
-          salary: contracts.salary,
-        })
-          .from(contracts)
-          .where(and(
-            eq(contracts.team_id, team.id),
+        const activeContracts = await db.query.contracts.findMany({
+          where: and(
+            eq(contracts.teamId, team.id),
             eq(contracts.status, 'active')
-          ));
+          ),
+          columns: {
+            playerId: true,
+            salary: true,
+          },
+        });
 
         // Calculate total salary excluding exempt players
         const totalSalary = activeContracts.reduce((sum, contract) => {
-          const player = teamPlayers.find(p => p.id === contract.player_id);
-          return sum + (player?.salary_exempt ? 0 : contract.salary);
+          const player = teamPlayers.find(p => p.id === contract.playerId);
+          return sum + (player?.salaryExempt ? 0 : contract.salary);
         }, 0);
 
-        const availableCap = (team.salary_cap ?? 0) - totalSalary;
+        const availableCap = (team.salaryCap ?? 0) - totalSalary;
 
         // Create embed for team information
         const embed = new EmbedBuilder()
@@ -223,7 +224,7 @@ export const TeamCommands = [
             {
               name: 'Salary Cap Information',
               value:
-                `Total Cap: $${(team.salary_cap ?? 0).toLocaleString()}\n` +
+                `Total Cap: $${(team.salaryCap ?? 0).toLocaleString()}\n` +
                 `Used Cap: $${totalSalary.toLocaleString()}\n` +
                 `Available Cap: $${availableCap.toLocaleString()}`
             }
@@ -232,14 +233,14 @@ export const TeamCommands = [
         // Add roster information
         if (teamPlayers.length > 0) {
           // Separate exempt and non-exempt players
-          const exemptPlayers = teamPlayers.filter(p => p.salary_exempt);
-          const nonExemptPlayers = teamPlayers.filter(p => !p.salary_exempt);
+          const exemptPlayers = teamPlayers.filter(p => p.salaryExempt);
+          const nonExemptPlayers = teamPlayers.filter(p => !p.salaryExempt);
 
           // Format player lists
           const formatPlayer = (player: typeof teamPlayers[0]) => {
-            const playerContract = activeContracts.find(c => c.player_id === player.id);
+            const playerContract = activeContracts.find(c => c.playerId === player.id);
             const salary = playerContract ? `$${playerContract.salary.toLocaleString()}` : 'No active contract';
-            return `<@${player.discord_id}> - ${salary}`;
+            return `<@${player.discordId}> - ${salary}`;
           };
 
           if (nonExemptPlayers.length > 0) {
