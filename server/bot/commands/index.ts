@@ -26,11 +26,24 @@ export async function registerCommands(client: Client) {
 
   console.log('Starting command registration...');
 
-  const token = process.env.DISCORD_TOKEN;
-  const guildId = process.env.DISCORD_GUILD_ID;
+  // Get the first guild the bot is in
+  const guilds = await client.guilds.fetch();
+  if (guilds.size === 0) {
+    throw new Error('Bot is not in any guilds');
+  }
 
-  if (!token || !guildId) {
-    throw new Error('Required environment variables not found');
+  // Use the first guild's ID
+  const firstGuild = guilds.first();
+  if (!firstGuild) {
+    throw new Error('Failed to get first guild');
+  }
+
+  const guildId = firstGuild.id;
+  console.log(`Using guild ID: ${guildId}`);
+
+  const token = process.env.DISCORD_TOKEN;
+  if (!token) {
+    throw new Error('Discord token not found');
   }
 
   const rest = new REST({ version: '10' }).setToken(token);
@@ -49,9 +62,9 @@ export async function registerCommands(client: Client) {
           if (command?.data && command.execute) {
             commands.push(command.data.toJSON());
             client.commands.set(command.data.name, command);
-          } else if (!command?.data){
+          } else if (!command?.data) {
             console.warn(`Command in module ${moduleName} is missing data`);
-          } else if (!command.execute){
+          } else if (!command.execute) {
             console.warn(`Command in module ${moduleName} is missing execute function`);
           }
         }
@@ -65,7 +78,7 @@ export async function registerCommands(client: Client) {
     );
 
     console.log('Successfully reloaded application (/) commands.');
-    console.log('Registration data:', data);
+    console.log(`Registered ${commands.length} commands in guild ${guildId}`);
     return true;
   } catch (error) {
     console.error('Error registering commands:', error);
@@ -76,9 +89,9 @@ export async function registerCommands(client: Client) {
         stack: error.stack
       });
       if (error.message.includes('Missing Access')) {
-          throw new Error('Bot lacks permissions to create commands. Ensure bot has "applications.commands" scope');
+        throw new Error('Bot lacks permissions to create commands. Ensure bot has "applications.commands" scope');
       } else if (error.message.includes('Unknown Guild')) {
-          throw new Error(`Bot is not in the specified guild (ID: ${guildId})`);
+        throw new Error(`Bot is not in the specified guild (ID: ${guildId})`);
       }
     }
     throw error;
