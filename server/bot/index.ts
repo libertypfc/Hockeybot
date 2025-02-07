@@ -421,7 +421,8 @@ export class DiscordBot extends Client {
   private async handleReady(client: Client) {
     this.log('Bot is ready and connected to Discord', 'info');
     this.log(`Bot User Info: ${client.user?.tag} (ID: ${client.user?.id})`, 'debug');
-    this.log(`Guilds: ${client.guilds.cache.size}`, 'debug');
+    this.log(`Connected to ${client.guilds.cache.size} guilds`, 'debug');
+    this.log(`Bot permissions: ${client.user?.flags?.toArray().join(', ') || 'None'}`, 'debug');
 
     // Reset reconnection counter on successful connection
     this.reconnectAttempt = 0;
@@ -446,6 +447,9 @@ export class DiscordBot extends Client {
 
     } catch (error) {
       this.log(`Initialization error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      if (error instanceof Error) {
+        this.log(`Error stack: ${error.stack}`, 'error');
+      }
       await this.handleDisconnect();
     }
   }
@@ -457,6 +461,11 @@ export class DiscordBot extends Client {
       try {
         this.log(`Attempting to register commands (attempt ${attempt + 1}/${maxAttempts})`, 'info');
 
+        // Verify client state before registration
+        if (!this.isReady() || !this.user) {
+          throw new Error('Client not ready for command registration');
+        }
+
         await registerCommands(this);
         this.hasRegisteredCommands = true;
         this.log('Commands registered successfully', 'info');
@@ -465,6 +474,9 @@ export class DiscordBot extends Client {
       } catch (error) {
         attempt++;
         this.log(`Command registration attempt ${attempt} failed: ${error}`, 'error');
+        if (error instanceof Error) {
+          this.log(`Error details: ${error.stack}`, 'error');
+        }
 
         if (attempt === maxAttempts) {
           throw new Error(`Failed to register commands after ${maxAttempts} attempts`);
@@ -472,6 +484,7 @@ export class DiscordBot extends Client {
 
         // Exponential backoff with maximum delay
         const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        this.log(`Waiting ${delay}ms before next attempt`, 'debug');
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }

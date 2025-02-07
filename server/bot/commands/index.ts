@@ -40,7 +40,7 @@ export async function registerCommands(client: Client) {
   const rest = new REST({ version: '10' }).setToken(token);
 
   try {
-    console.log('Started refreshing application (/) commands.');
+    console.log(`Started refreshing application (/) commands for ${client.user.tag}`);
 
     // Create a new Collection for commands
     client.commands = new Collection();
@@ -62,13 +62,28 @@ export async function registerCommands(client: Client) {
         }
 
         const commandName = command.data.name;
-        validCommands.set(commandName, command);
-        client.commands.set(commandName, command);
+        console.log(`Validating command: ${commandName} from ${moduleName}`);
+
+        try {
+          // Verify command data can be converted to JSON
+          const commandJSON = command.data.toJSON();
+          validCommands.set(commandName, command);
+          client.commands.set(commandName, command);
+          console.log(`Command ${commandName} validated successfully`);
+        } catch (error) {
+          console.error(`Failed to validate command ${commandName}:`, error);
+          continue;
+        }
       }
     }
 
     // Convert commands to JSON
-    const commandData = Array.from(validCommands.values()).map(cmd => cmd.data.toJSON());
+    const commandData = Array.from(validCommands.values()).map(cmd => {
+      const json = cmd.data.toJSON();
+      console.log(`Prepared command for registration: ${json.name}`);
+      return json;
+    });
+
     console.log(`Prepared ${commandData.length} commands for registration`);
 
     // Delete all existing commands
@@ -79,6 +94,7 @@ export async function registerCommands(client: Client) {
     );
 
     // Wait for deletion to propagate
+    console.log('Waiting for command deletion to propagate...');
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Register new commands
@@ -96,6 +112,13 @@ export async function registerCommands(client: Client) {
 
   } catch (error) {
     console.error('Error in command registration:', error);
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+    }
     hasRegisteredGlobally = false;
     throw error;
   }
