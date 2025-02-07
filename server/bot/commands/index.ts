@@ -39,12 +39,29 @@ export async function registerCommands(client: Client) {
 
     console.log(`Bot is in ${guilds.length} guilds`);
 
+    // First, clear ALL commands from each guild
+    for (const guild of guilds) {
+      try {
+        console.log(`Clearing all commands from guild ${guild.id}...`);
+        await rest.put(
+          Routes.applicationGuildCommands(client.user.id, guild.id),
+          { body: [] }
+        );
+        console.log(`Successfully cleared all commands from guild ${guild.id}`);
+      } catch (error) {
+        console.error(`Failed to clear commands from guild ${guild.id}:`, error);
+      }
+    }
+
+    // Wait a moment to ensure commands are cleared
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
     // Create a new Collection for commands
     client.commands = new Collection();
 
-    // Process and validate commands
+    // Collect and validate unique commands
     const uniqueCommands = new Map<string, any>();
-    const processedNames = new Set<string>();
+    const registeredCommandNames = new Set<string>();
 
     // Process each command module
     for (const [moduleName, moduleCommands] of Object.entries(CommandModules)) {
@@ -53,56 +70,47 @@ export async function registerCommands(client: Client) {
         continue;
       }
 
-      console.log(`Processing ${moduleName}...`);
-
       for (const command of moduleCommands) {
         if (!command.data?.name || !(command.data instanceof SlashCommandBuilder)) {
-          console.warn(`Invalid command structure in ${moduleName}, skipping...`);
+          console.warn(`Invalid command structure in ${moduleName}, skipping command`);
           continue;
         }
 
         const commandName = command.data.name;
 
-        // Skip if we've already processed this command name
-        if (processedNames.has(commandName)) {
+        // Strict duplicate checking
+        if (registeredCommandNames.has(commandName)) {
           console.warn(`Duplicate command name '${commandName}' in ${moduleName}, skipping...`);
           continue;
         }
 
-        // Add to our tracking collections
-        processedNames.add(commandName);
+        // Log each command being registered
+        console.log(`Registering command: ${commandName} from ${moduleName}`);
+        registeredCommandNames.add(commandName);
         uniqueCommands.set(commandName, command);
-        console.log(`Registered command: ${commandName} from ${moduleName}`);
       }
     }
 
     // Convert commands to Discord API format
-    const commandData = Array.from(uniqueCommands.values()).map(cmd => cmd.data.toJSON());
+    const commandData = Array.from(uniqueCommands.values()).map(cmd => {
+      const json = cmd.data.toJSON();
+      console.log(`Prepared command for API: ${json.name}`);
+      return json;
+    });
+
     console.log(`Prepared ${commandData.length} unique commands for registration`);
 
-    // Clear and register commands for each guild
+    // Register commands to each guild
     for (const guild of guilds) {
-      console.log(`Processing guild: ${guild.id}`);
-
       try {
-        // First, remove all existing commands from this guild
-        console.log(`Clearing existing commands from guild ${guild.id}`);
-        await rest.put(
-          Routes.applicationGuildCommands(client.user.id, guild.id),
-          { body: [] }
-        );
-
-        // Then register the new commands
         console.log(`Registering ${commandData.length} commands to guild ${guild.id}`);
         await rest.put(
           Routes.applicationGuildCommands(client.user.id, guild.id),
           { body: commandData }
         );
-
         console.log(`Successfully registered commands in guild ${guild.id}`);
       } catch (error) {
-        console.error(`Error processing guild ${guild.id}:`, error);
-        // Continue with other guilds even if one fails
+        console.error(`Error registering commands to guild ${guild.id}:`, error);
         continue;
       }
     }
