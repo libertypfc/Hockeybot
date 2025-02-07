@@ -33,7 +33,6 @@ export async function registerCommands(client: Client) {
   }
 
   console.log('Starting command registration process...');
-
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
 
   try {
@@ -43,6 +42,17 @@ export async function registerCommands(client: Client) {
     // Collect and validate unique commands
     const uniqueCommands = new Map<string, any>();
     const registeredCommandNames = new Set<string>();
+    const duplicateCommands = new Set<string>();
+
+    // First, clear all existing commands
+    console.log('Clearing existing global application commands...');
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: [] }
+    );
+
+    // Wait to ensure commands are cleared
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Process each command module
     for (const [moduleName, moduleCommands] of Object.entries(CommandModules)) {
@@ -51,36 +61,40 @@ export async function registerCommands(client: Client) {
         continue;
       }
 
+      console.log(`Processing commands from module: ${moduleName}`);
+
       for (const command of moduleCommands) {
-        if (!command.data?.name || !(command.data instanceof SlashCommandBuilder)) {
-          console.warn(`Invalid command structure in ${moduleName}, skipping command`);
+        // Validate command structure
+        if (!command?.data?.name || !command.data.description || !(command.data instanceof SlashCommandBuilder)) {
+          console.warn(`Invalid command structure in ${moduleName}, missing required properties`);
+          continue;
+        }
+
+        if (typeof command.execute !== 'function') {
+          console.warn(`Invalid command in ${moduleName}: missing execute function`);
           continue;
         }
 
         const commandName = command.data.name;
 
-        // Strict duplicate checking
+        // Track duplicates
         if (registeredCommandNames.has(commandName)) {
-          console.warn(`Duplicate command name '${commandName}' in ${moduleName}, skipping...`);
+          duplicateCommands.add(commandName);
+          console.warn(`Duplicate command name '${commandName}' found in ${moduleName}, skipping...`);
           continue;
         }
 
-        // Log each command being registered
+        // Register valid commands
         console.log(`Registering command: ${commandName} from ${moduleName}`);
         registeredCommandNames.add(commandName);
         uniqueCommands.set(commandName, command);
       }
     }
 
-    // First, clear all global commands
-    console.log('Clearing global application commands...');
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: [] }
-    );
-
-    // Wait a moment to ensure commands are cleared
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Log duplicate commands if any were found
+    if (duplicateCommands.size > 0) {
+      console.warn('Found duplicate commands:', Array.from(duplicateCommands));
+    }
 
     // Convert commands to Discord API format
     const commandData = Array.from(uniqueCommands.values()).map(cmd => {
@@ -99,13 +113,14 @@ export async function registerCommands(client: Client) {
     );
 
     // Set up the client.commands Collection
-    for (const [name, command] of uniqueCommands) {
+    uniqueCommands.forEach((command, name) => {
       client.commands.set(name, command);
-    }
+    });
 
     console.log(`Successfully registered ${uniqueCommands.size} unique commands globally`);
     hasRegisteredGlobally = true;
     return true;
+
   } catch (error) {
     console.error('Error in command registration:', error);
     throw error;
