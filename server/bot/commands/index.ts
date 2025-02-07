@@ -97,9 +97,16 @@ export async function registerCommands(client: Client) {
     for (const guild of guilds) {
       console.log(`Registering ${commandData.length} commands for guild: ${guild.id}`);
 
+      // First, remove all existing commands from this guild
       await rest.put(
         Routes.applicationGuildCommands(client.user.id, guild.id),
-        { body: commandData },
+        { body: [] }
+      );
+
+      // Then register the new commands
+      await rest.put(
+        Routes.applicationGuildCommands(client.user.id, guild.id),
+        { body: commandData }
       );
 
       console.log(`Successfully registered commands in guild ${guild.id}`);
