@@ -79,43 +79,17 @@ async function startApplication() {
       });
     });
 
-    // Start Discord bot with retries
-    let botStartAttempts = 0;
-    const maxBotStartAttempts = 3;
-    const startBot = async () => {
-      try {
-        console.log('='.repeat(50));
-        console.log('[BOT STARTUP] Attempting to start Discord bot...');
-        console.log('='.repeat(50));
-
-        const discordClient = await startBot();
-        if (discordClient && discordClient.isReady()) {
-          console.log('='.repeat(50));
-          console.log('[BOT STARTUP] Discord bot started successfully and is online');
-          console.log(`[BOT STARTUP] Bot username: ${discordClient.user?.tag}`);
-          console.log(`[BOT STARTUP] Connected to ${discordClient.guilds.cache.size} guilds`);
-          console.log('='.repeat(50));
-          return true;
-        }
-        return false;
-      } catch (error) {
-        console.error('='.repeat(50));
-        console.error('[BOT STARTUP ERROR] Failed to start Discord bot:', error);
-        console.error('='.repeat(50));
-        return false;
+    // Start Discord bot after server is running
+    log('Starting Discord bot...', 'startup');
+    try {
+      const botClient = await startBot();
+      if (botClient) {
+        log('Discord bot started successfully', 'startup');
       }
-    };
-
-    // Initial attempt with delay
-    setTimeout(async () => {
-      while (botStartAttempts < maxBotStartAttempts) {
-        if (await startBot()) break;
-        botStartAttempts++;
-        if (botStartAttempts < maxBotStartAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 5000 * botStartAttempts));
-        }
-      }
-    }, 5000); // Initial 5-second delay
+    } catch (error) {
+      log(`Warning: Failed to start Discord bot: ${error}`, 'startup');
+      // Don't throw error here, allow server to run without bot
+    }
 
     return true;
   } catch (error) {

@@ -12,48 +12,67 @@ export function registerRoutes(app: Express): Server {
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
-      if (!client || !client.isReady()) {
+      if (!client) {
+        console.error('Discord client is null');
         return res.status(503).json({
           error: 'Discord connection unavailable',
-          details: 'The Discord bot is still initializing or not connected. Please try again in a few moments.'
+          details: 'The Discord bot is not initialized'
         });
       }
 
+      if (!client.isReady()) {
+        console.error('Discord client is not ready');
+        return res.status(503).json({
+          error: 'Discord connection unavailable',
+          details: 'The Discord bot is still initializing. Please try again in a few moments.'
+        });
+      }
+
+      console.log('Client ready, attempting to fetch guilds...');
+
       // Get cached guilds first
       let guilds = client.guilds.cache;
+      console.log(`Initial guild cache size: ${guilds.size}`);
 
       // If cache is empty, try to fetch
       if (guilds.size === 0) {
         try {
+          console.log('Cache empty, fetching guilds from Discord API...');
           const fetchedGuilds = await client.guilds.fetch();
           guilds = fetchedGuilds;
+          console.log(`Fetched ${guilds.size} guilds from Discord API`);
         } catch (fetchError) {
           console.error('Error fetching guilds:', fetchError);
           return res.status(500).json({
             error: 'Failed to fetch Discord servers',
-            details: 'Could not retrieve server list from Discord. Please verify bot permissions.'
+            details: fetchError instanceof Error ? fetchError.message : 'Unknown error fetching servers'
           });
         }
       }
 
       // Map guild data
-      const servers = Array.from(guilds.values()).map(guild => ({
-        id: guild.id,
-        name: guild.name,
-        memberCount: guild.memberCount
-      }));
+      const servers = Array.from(guilds.values()).map(guild => {
+        console.log(`Processing guild: ${guild.id} - ${guild.name}`);
+        return {
+          id: guild.id,
+          name: guild.name,
+          memberCount: guild.memberCount
+        };
+      });
 
       if (servers.length === 0) {
+        console.log('No servers found in the response');
         return res.status(404).json({
           error: 'No servers found',
           details: 'The bot is not a member of any Discord servers. Please add the bot to a server first.'
         });
       }
 
-      console.log('Returning servers:', servers); // Debug log
+      console.log(`Returning ${servers.length} servers:`, servers);
       res.json(servers);
+
     } catch (error) {
-      console.error('Error in /api/servers route:', error);
+      console.error('Unexpected error in /api/servers route:', error);
       res.status(500).json({ 
         error: 'Failed to fetch servers',
         details: error instanceof Error ? error.message : 'Unknown error occurred while fetching servers'

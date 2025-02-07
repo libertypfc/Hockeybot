@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChannel, DMChannel, ChannelType, SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -17,7 +17,7 @@ export class DiscordBot extends Client {
   private static instance: DiscordBot | null = null;
   private isConnecting: boolean = false;
   private reconnectAttempt: number = 0;
-  private readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private readonly MAX_RECONNECT_ATTEMPTS = 3;
   private readonly RECONNECT_DELAY = 5000;
 
   constructor() {
@@ -46,7 +46,7 @@ export class DiscordBot extends Client {
   private setupEventHandlers(): void {
     this.once(Events.ClientReady, this.handleReady.bind(this));
     this.on(Events.Error, this.handleError.bind(this));
-    this.on(Events.Disconnect, this.handleDisconnect.bind(this));
+    this.on('disconnect', this.handleDisconnect.bind(this));
   }
 
   async start(): Promise<boolean> {
@@ -91,22 +91,11 @@ export class DiscordBot extends Client {
   private handleError(error: Error): void {
     this.log(`Error encountered: ${error.message}`, 'error');
     console.error(error);
-
-    if (!this.isConnecting) {
-      this.reconnectAttempt = 0;
-      this.start().catch(e => this.log(`Reconnection failed: ${e.message}`, 'error'));
-    }
   }
 
   private handleDisconnect(): void {
     this.log('Disconnected from Discord', 'warn');
     this.cleanup();
-
-    if (!this.isConnecting) {
-      this.start().catch(error => {
-        this.log(`Failed to reconnect: ${error.message}`, 'error');
-      });
-    }
   }
 
   private async cleanup(): Promise<void> {
@@ -125,10 +114,17 @@ export class DiscordBot extends Client {
     }
   }
 
-
   private async handleReady() {
     this.log('Bot is ready and connected to Discord', 'info');
     try {
+      // Force guild fetch after ready
+      try {
+        const guilds = await this.guilds.fetch();
+        this.log(`Fetched ${guilds.size} guilds on ready`, 'info');
+      } catch (error) {
+        this.log(`Warning: Guild fetch failed: ${error}`, 'warn');
+      }
+
       await registerCommands(this);
       this.log('Commands registered successfully', 'info');
     } catch (error) {
