@@ -7,96 +7,6 @@ import { ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilde
 export const TeamCommands = [
   {
     data: new SlashCommandBuilder()
-      .setName('createteam')
-      .setDescription('Creates a new team')
-      .addStringOption(option =>
-        option.setName('name')
-          .setDescription('The name of the team')
-          .setRequired(true))
-      .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-
-    async execute(interaction: ChatInputCommandInteraction) {
-      await interaction.deferReply();
-
-      try {
-        const teamName = interaction.options.getString('name', true);
-        const guildId = interaction.guildId;
-
-        if (!guildId) {
-          return interaction.editReply('This command can only be used in a server.');
-        }
-
-        // Check if team name already exists in this guild
-        const existingTeam = await db.select({
-          id: teams.id
-        })
-        .from(teams)
-        .where(and(
-          eq(teams.name, teamName),
-          eq(teams.guild_id, guildId)
-        ))
-        .then(rows => rows[0]);
-
-        if (existingTeam) {
-          return interaction.editReply(`A team named "${teamName}" already exists in this server.`);
-        }
-
-        // Create category
-        const category = await interaction.guild?.channels.create({
-          name: teamName,
-          type: ChannelType.GuildCategory,
-        });
-
-        if (!category || !interaction.guild) {
-          return interaction.editReply('Failed to create team category');
-        }
-
-        // Create channels
-        const channels = [
-          ['team-chat', ChannelType.GuildText],
-          ['signing', ChannelType.GuildText],
-          ['roster', ChannelType.GuildText],
-          ['stats-pictures', ChannelType.GuildText],
-          ['team-voice', ChannelType.GuildVoice],
-        ] as const;
-
-        await Promise.all(channels.map(([name, type]) =>
-          interaction.guild!.channels.create({
-            name,
-            type,
-            parent: category.id
-          })
-        ));
-
-        // Create team role
-        const role = await interaction.guild.roles.create({
-          name: teamName,
-          mentionable: true,
-        });
-
-        // Insert team into database with minimal required fields
-        const [newTeam] = await db.insert(teams)
-          .values({
-            name: teamName,
-            discord_category_id: category.id,
-            guild_id: guildId,
-            salary_cap: 82500000,
-            available_cap: 82500000,
-            cap_floor: 60375000, // 73.2% of the cap
-          })
-          .returning();
-
-        await interaction.editReply(`Team "${teamName}" has been created successfully!`);
-
-      } catch (error) {
-        console.error('Error creating team:', error);
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        await interaction.editReply(`Failed to create team: ${errorMessage}`);
-      }
-    },
-  },
-  {
-    data: new SlashCommandBuilder()
       .setName('deleteteam')
       .setDescription('Deletes a team and all associated channels/roles')
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
@@ -155,8 +65,8 @@ export const TeamCommands = [
           const teamPlayers = await db.select({
             id: players.id,
           })
-          .from(players)
-          .where(eq(players.currentTeamId, teamId));
+            .from(players)
+            .where(eq(players.currentTeamId, teamId));
 
           await db.update(players)
             .set({
@@ -279,12 +189,12 @@ export const TeamCommands = [
           id: teams.id,
           name: teams.name,
         })
-        .from(teams)
-        .where(and(
-          eq(teams.name, teamName),
-          eq(teams.guildId, guildId)
-        ))
-        .then(rows => rows[0]);
+          .from(teams)
+          .where(and(
+            eq(teams.name, teamName),
+            eq(teams.guildId, guildId)
+          ))
+          .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply(`Team "${teamName}" not found in database for this guild`);
@@ -294,8 +204,8 @@ export const TeamCommands = [
         const teamPlayers = await db.select({
           id: players.id,
         })
-        .from(players)
-        .where(eq(players.currentTeamId, team.id));
+          .from(players)
+          .where(eq(players.currentTeamId, team.id));
 
 
         // Update all players on this team to free agents
@@ -355,12 +265,12 @@ export const TeamCommands = [
           salaryCap: teams.salaryCap,
           availableCap: teams.availableCap,
         })
-        .from(teams)
-        .where(and(
-          eq(teams.name, teamRole.name),
-          eq(teams.guildId, guildId)
-        ))
-        .then(rows => rows[0]);
+          .from(teams)
+          .where(and(
+            eq(teams.name, teamRole.name),
+            eq(teams.guildId, guildId)
+          ))
+          .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply('Team not found in database for this guild');
@@ -382,11 +292,11 @@ export const TeamCommands = [
           playerId: contracts.playerId,
           salary: contracts.salary,
         })
-        .from(contracts)
-        .where(and(
-          eq(contracts.teamId, team.id),
-          eq(contracts.status, 'active')
-        ));
+          .from(contracts)
+          .where(and(
+            eq(contracts.teamId, team.id),
+            eq(contracts.status, 'active')
+          ));
 
         // Calculate total salary excluding exempt players
         const totalSalary = activeContracts.reduce((sum, contract) => {
@@ -865,12 +775,12 @@ export const TeamCommands = [
           name: teams.name,
           salaryCap: teams.salaryCap,
         })
-        .from(teams)
-        .where(and(
-          eq(teams.name, teamRole.name),
-          eq(teams.guildId, guildId)
-        ))
-        .then(rows => rows[0]);
+          .from(teams)
+          .where(and(
+            eq(teams.name, teamRole.name),
+            eq(teams.guildId, guildId)
+          ))
+          .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply('Team not found in database for this guild');
@@ -934,12 +844,12 @@ export const TeamCommands = [
           name: teams.name,
           capFloor: teams.capFloor,
         })
-        .from(teams)
-        .where(and(
-          eq(teams.name, teamRole.name),
-          eq(teams.guildId, guildId)
-        ))
-        .then(rows => rows[0]);
+          .from(teams)
+          .where(and(
+            eq(teams.name, teamRole.name),
+            eq(teams.guildId, guildId)
+          ))
+          .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply('Team not found in database for this guild');

@@ -1,12 +1,12 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
-import { conferences, divisions } from '@db/schema';
+import { conferences, divisions, teams } from '@db/schema';
 import { eq } from 'drizzle-orm';
 
 export const OrganizationCommands = [
   {
     data: new SlashCommandBuilder()
-      .setName('createconference')
+      .setName('createconf')
       .setDescription('Create a new conference')
       .addStringOption(option =>
         option.setName('name')
@@ -42,7 +42,7 @@ export const OrganizationCommands = [
   },
   {
     data: new SlashCommandBuilder()
-      .setName('createdivision')
+      .setName('creatediv')
       .setDescription('Create a new division')
       .addStringOption(option =>
         option.setName('name')
@@ -95,7 +95,62 @@ export const OrganizationCommands = [
   },
   {
     data: new SlashCommandBuilder()
-      .setName('vieworganization')
+      .setName('createteam')
+      .setDescription('Create a new team')
+      .addStringOption(option =>
+        option.setName('name')
+          .setDescription('The name of the team')
+          .setRequired(true))
+      .addStringOption(option =>
+        option.setName('division')
+          .setDescription('The division this team belongs to')
+          .setRequired(true))
+      .addRoleOption(option =>
+        option.setName('role')
+          .setDescription('The team role')
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const name = interaction.options.getString('name', true);
+        const divisionName = interaction.options.getString('division', true);
+        const role = interaction.options.getRole('role', true);
+
+        // Find the division
+        const division = await db.query.divisions.findFirst({
+          where: eq(divisions.name, divisionName),
+        });
+
+        if (!division) {
+          return interaction.editReply(`Division "${divisionName}" not found.`);
+        }
+
+        const team = await db.insert(teams)
+          .values({
+            name,
+            divisionId: division.id,
+            salaryCap: 82500000, // Default salary cap
+            availableCap: 82500000,
+            capFloor: 60375000, // 73.2% of cap
+          })
+          .returning();
+
+        await interaction.editReply(
+          `Team "${name}" has been created in the ${divisionName} division.`
+        );
+      } catch (error) {
+        console.error('Error creating team:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to create team: ${errorMessage}`);
+      }
+    },
+  },
+  {
+    data: new SlashCommandBuilder()
+      .setName('vieworg')
       .setDescription('View the league organization structure'),
 
     async execute(interaction: ChatInputCommandInteraction) {
@@ -126,9 +181,9 @@ export const OrganizationCommands = [
           for (const division of conference.divisions) {
             conferenceText += `\n__${division.name} Division__\n`;
 
-            if (division.teams.length === 0) {
+            if (division.teams && division.teams.length === 0) {
               conferenceText += '• No teams assigned\n';
-            } else {
+            } else if (division.teams) {
               division.teams.forEach(team => {
                 conferenceText += `• ${team.name}\n`;
               });

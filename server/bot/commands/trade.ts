@@ -156,10 +156,10 @@ export const TradeCommands = [
         // Create trade proposal
         const [proposal] = await db.insert(tradeProposals)
           .values({
-            from_team_id: teamSending.id,
-            to_team_id: teamReceiving.id,
-            player_id: playerSendingData.id,
-            player_receiving_id: playerReceivingData.id,
+            playerId: playerSendingData.id,
+            fromTeamId: teamSending.id,
+            toTeamId: teamReceiving.id,
+            playerReceivingId: playerReceivingData.id,
             status: 'pending',
           })
           .returning();
@@ -204,7 +204,7 @@ export const TradeCommands = [
 
         // Store message ID for reference
         await db.update(tradeProposals)
-          .set({ message_id: reply.id })
+          .set({ messageId: reply.id })
           .where(eq(tradeProposals.id, proposal.id));
 
       } catch (error) {

@@ -39,17 +39,17 @@ export const WaiversCommands = [
         // Save or update settings
         await db.insert(waiverSettings)
           .values({
-            guild_id: guild.id,
-            notification_channel_id: channel.id,
-            scout_role_id: scoutRole.id,
-            gm_role_id: gmRole.id,
+            guildId: guild.id,
+            notificationChannelId: channel.id,
+            scoutRoleId: scoutRole.id,
+            gmRoleId: gmRole.id,
           })
           .onConflictDoUpdate({
             target: waiverSettings.guildId,
             set: {
-              notification_channel_id: channel.id,
-              scout_role_id: scoutRole.id,
-              gm_role_id: gmRole.id,
+              notificationChannelId: channel.id,
+              scoutRoleId: scoutRole.id,
+              gmRoleId: gmRole.id,
             },
           });
 
@@ -190,10 +190,10 @@ export const WaiversCommands = [
         // Create waiver entry
         await db.insert(waivers)
           .values({
-            player_id: player.id,
-            from_team_id: player.currentTeamId,
-            start_time: new Date(),
-            end_time: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48 hours from now
+            playerId: player.id,
+            fromTeamId: player.currentTeamId,
+            startTime: new Date(),
+            endTime: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48 hours from now
             status: 'active',
           });
 
@@ -201,7 +201,7 @@ export const WaiversCommands = [
         if (!player.salaryExempt) {
           await db.update(teams)
             .set({
-              available_cap: sql`${teams.available_cap} - ${activeContract.salary}`,
+              availableCap: sql`${teams.availableCap} - ${activeContract.salary}`,
             })
             .where(eq(teams.id, player.currentTeamId));
         }
