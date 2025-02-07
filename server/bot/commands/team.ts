@@ -469,6 +469,100 @@ export const TeamCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('release')
+      .setDescription('Release a player to free agency immediately')
+      .addUserOption(option =>
+        option.setName('player')
+          .setDescription('The player to release')
+          .setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const user = interaction.options.getUser('player', true);
+        const guildId = interaction.guildId;
+
+        if (!guildId) {
+          return interaction.editReply('This command must be run in a guild.');
+        }
+
+        // Find player in database
+        const player = await db.query.players.findFirst({
+          where: eq(players.discordId, user.id),
+        });
+
+        if (!player) {
+          return interaction.editReply('Player not found in the database.');
+        }
+
+        if (!player.currentTeamId) {
+          return interaction.editReply('This player is not currently on a team.');
+        }
+
+        // Get current team info for the message
+        const team = await db.query.teams.findFirst({
+          where: eq(teams.id, player.currentTeamId),
+        });
+
+        // Update player status to free agent and remove team
+        await db.update(players)
+          .set({
+            currentTeamId: null,
+            status: 'free_agent'
+          })
+          .where(eq(players.id, player.id));
+
+        // End any active contracts
+        await db.update(contracts)
+          .set({
+            status: 'terminated',
+            endDate: new Date()
+          })
+          .where(and(
+            eq(contracts.playerId, player.id),
+            eq(contracts.status, 'active')
+          ));
+
+        // Update Discord roles if possible
+        if (interaction.guild) {
+          try {
+            const member = await interaction.guild.members.fetch(user.id);
+
+            // Remove any team roles
+            const teamRole = team ? interaction.guild.roles.cache.find(role => role.name === team.name) : null;
+            if (teamRole) {
+              await member.roles.remove(teamRole);
+            }
+
+            // Add Free Agent role
+            const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === 'Free Agent');
+            if (freeAgentRole) {
+              await member.roles.add(freeAgentRole);
+            }
+          } catch (error) {
+            console.error('Error updating Discord roles:', error);
+          }
+        }
+
+        const embed = new EmbedBuilder()
+          .setTitle('Player Released')
+          .setDescription(`${user} has been released to free agency${team ? ` from ${team.name}` : ''}.`)
+          .setColor('#FF0000')
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error('Error in release command:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to release player: ${errorMessage}`);
+      }
+    },
+  },
 ];
 
 // Helper function for assigning free agent role
@@ -480,7 +574,7 @@ async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, pla
 
     if (!player || !interaction.guild) return;
 
-    const member = await interaction.guild.members.fetch(player.discord_id);
+    const member = await interaction.guild.members.fetch(player.discordId);
     const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === 'Free Agent');
 
     if (freeAgentRole && member) {
