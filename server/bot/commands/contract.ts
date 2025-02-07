@@ -1,7 +1,8 @@
-import { SlashCommandBuilder, EmbedBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, EmbedBuilder, ChatInputCommandInteraction, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ActionRowBuilder, ComponentType } from 'discord.js';
 import { db } from '@db';
 import { players, contracts, teams } from '@db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { sql } from 'drizzle-orm/sql';
 
 async function sendWelcomeMessage(user: any, teamRole: any) {
   const welcomeEmbed = new EmbedBuilder()
@@ -81,8 +82,8 @@ export const ContractCommands = [
         const team = await db.select({
           id: teams.id,
           name: teams.name,
-          salary_cap: teams.salary_cap,
-          available_cap: teams.available_cap,
+          salaryCap: teams.salary_cap,
+          availableCap: teams.available_cap,
         })
           .from(teams)
           .where(eq(teams.name, teamRole.name))
@@ -113,7 +114,7 @@ export const ContractCommands = [
           lengthDisplay = `${weeksInput} week${weeksInput !== 1 ? 's' : ''}`;
         }
 
-        const availableCap = team.available_cap ?? 0;
+        const availableCap = team.availableCap ?? 0;
         if (availableCap < salary) {
           return interaction.editReply('Team does not have enough cap space');
         }
@@ -249,7 +250,6 @@ export const ContractCommands = [
           console.warn(`Could not send DM to ${user.tag}`, error);
         }
 
-
       } catch (error) {
         console.error('Error in contract offer command:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
@@ -257,4 +257,175 @@ export const ContractCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('exemptplayer')
+      .setDescription('Set a player as salary cap exempt'),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      try {
+        const guildId = interaction.guildId;
+
+        if (!guildId) {
+          return interaction.reply('This command must be run in a guild.');
+        }
+
+        const allTeams = await db.query.teams.findMany({
+          with: {
+            players: {
+              where: eq(players.status, 'signed'),
+            },
+          },
+          where: eq(teams.guild_id, guildId)
+        });
+
+        if (allTeams.length === 0) {
+          return interaction.reply('No teams found in the database for this guild.');
+        }
+
+        const teamSelect = new StringSelectMenuBuilder()
+          .setCustomId('team-select')
+          .setPlaceholder('Select a team')
+          .addOptions(
+            allTeams.map(team =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(team.name)
+                .setValue(team.id.toString())
+                .setDescription(`Select ${team.name} to manage exemptions`)
+            )
+          );
+
+        const row = new ActionRowBuilder<StringSelectMenuBuilder>()
+          .addComponents(teamSelect);
+
+        const response = await interaction.reply({
+          content: 'Please select a team to manage salary exemptions:',
+          components: [row],
+        });
+
+        const teamSelection = await response.awaitMessageComponent({
+          filter: i => i.user.id === interaction.user.id,
+          time: 30000,
+          componentType: ComponentType.StringSelect,
+        });
+
+        const selectedTeamId = parseInt(teamSelection.values[0]);
+        const selectedTeam = allTeams.find(t => t.id === selectedTeamId);
+
+        if (!selectedTeam) {
+          return teamSelection.update({
+            content: 'Selected team not found.',
+            components: [],
+          });
+        }
+
+        const teamPlayers = await db.query.players.findMany({
+          where: and(
+            eq(players.current_team_id, selectedTeamId),
+            eq(players.status, 'signed')
+          ),
+        });
+
+        if (teamPlayers.length === 0) {
+          return teamSelection.update({
+            content: 'No signed players found for this team.',
+            components: [],
+          });
+        }
+
+        const playerSelect = new StringSelectMenuBuilder()
+          .setCustomId('player-select')
+          .setPlaceholder('Select a player')
+          .addOptions(
+            teamPlayers.map(player =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(player.username)
+                .setValue(player.id.toString())
+                .setDescription(player.salary_exempt ? 'Currently Exempt' : 'Not Exempt')
+            )
+          );
+
+        const playerRow = new ActionRowBuilder<StringSelectMenuBuilder>()
+          .addComponents(playerSelect);
+
+        await teamSelection.update({
+          content: `Select a player from ${selectedTeam.name} to toggle salary exemption:`,
+          components: [playerRow],
+        });
+
+        const playerSelection = await response.awaitMessageComponent({
+          filter: i => i.user.id === interaction.user.id,
+          time: 30000,
+          componentType: ComponentType.StringSelect,
+        });
+
+        const selectedPlayerId = parseInt(playerSelection.values[0]);
+        const selectedPlayer = teamPlayers.find(p => p.id === selectedPlayerId);
+
+        if (!selectedPlayer) {
+          return playerSelection.update({
+            content: 'Selected player not found.',
+            components: [],
+          });
+        }
+
+        const exemptCount = await db.query.players.findMany({
+          where: and(
+            eq(players.current_team_id, selectedTeamId),
+            eq(players.salary_exempt, true)
+          ),
+        });
+
+        if (exemptCount.length >= 2 && !selectedPlayer.salary_exempt) {
+          return playerSelection.update({
+            content: 'Team already has 2 salary exempt players. Remove an exempt player before adding another.',
+            components: [],
+          });
+        }
+
+        await db.update(players)
+          .set({
+            salary_exempt: !selectedPlayer.salary_exempt
+          })
+          .where(eq(players.id, selectedPlayerId));
+
+        const activeContract = await db.query.contracts.findFirst({
+          where: and(
+            eq(contracts.player_id, selectedPlayerId),
+            eq(contracts.status, 'active')
+          ),
+        });
+
+        if (activeContract) {
+          const capAdjustment = selectedPlayer.salary_exempt ? -activeContract.salary : activeContract.salary;
+          await db.update(teams)
+            .set({
+              available_cap: sql`${teams.available_cap} + ${capAdjustment}`
+            })
+            .where(eq(teams.id, selectedTeamId));
+        }
+
+        const status = selectedPlayer.salary_exempt ? 'removed from' : 'added to';
+        await playerSelection.update({
+          content: `${selectedPlayer.username} has been ${status} salary cap exemption for ${selectedTeam.name}.\nThe team's available cap space has been adjusted accordingly.`,
+          components: [],
+        });
+
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('time')) {
+          await interaction.editReply({
+            content: 'Timed out! Please try the command again.',
+            components: [],
+          });
+        } else {
+          console.error('Error in exemption process:', error);
+          const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+          await interaction.editReply({
+            content: `Failed to manage player exemption: ${errorMessage}`,
+            components: [],
+          });
+        }
+      }
+    },
+  }
 ];
