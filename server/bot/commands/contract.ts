@@ -257,4 +257,116 @@ export const ContractCommands = [
       }
     },
   },
+  {
+    data: new SlashCommandBuilder()
+      .setName('cut')
+      .setDescription('Cut a player from the team')
+      .addUserOption(option =>
+        option.setName('player')
+          .setDescription('The player to cut')
+          .setRequired(true))
+      .setDefaultMemberPermissions('0'),
+
+    async execute(interaction: ChatInputCommandInteraction) {
+      await interaction.deferReply();
+
+      try {
+        const user = interaction.options.getUser('player', true);
+
+        // Get player from database
+        const player = await db.query.players.findFirst({
+          where: eq(players.discordId, user.id),
+          with: {
+            currentTeam: true,
+          }
+        });
+
+        if (!player) {
+          return interaction.editReply('Player not found in the database');
+        }
+
+        if (!player.currentTeamId) {
+          return interaction.editReply('This player is not currently on a team');
+        }
+
+        // Find active contract
+        const activeContract = await db.query.contracts.findFirst({
+          where: and(
+            eq(contracts.playerId, player.id),
+            eq(contracts.status, 'active')
+          )
+        });
+
+        // Update player status
+        await db.update(players)
+          .set({
+            currentTeamId: null,
+            status: 'free_agent'
+          })
+          .where(eq(players.id, player.id));
+
+        // If there was an active contract, terminate it
+        if (activeContract) {
+          await db.update(contracts)
+            .set({
+              status: 'terminated',
+              endDate: new Date()
+            })
+            .where(eq(contracts.id, activeContract.id));
+
+          // If player wasn't salary exempt, return cap space to team
+          if (!player.salaryExempt) {
+            await db.update(teams)
+              .set({
+                available_cap: sql`${teams.available_cap} + ${activeContract.salary}`
+              })
+              .where(eq(teams.id, player.currentTeamId));
+          }
+        }
+
+        // Update Discord roles if in a guild
+        if (interaction.guild) {
+          try {
+            const member = await interaction.guild.members.fetch(user.id);
+            const teamRole = interaction.guild.roles.cache.find(role => 
+              role.name === player.currentTeam?.name
+            );
+            const freeAgentRole = interaction.guild.roles.cache.find(role => 
+              role.name === 'Free Agent'
+            );
+
+            if (teamRole) {
+              await member.roles.remove(teamRole);
+            }
+            if (freeAgentRole) {
+              await member.roles.add(freeAgentRole);
+            }
+          } catch (error) {
+            console.error('Error updating roles:', error);
+          }
+        }
+
+        // Create embed for notification
+        const embed = new EmbedBuilder()
+          .setTitle('Player Cut 📋')
+          .setDescription(`${user} has been cut and is now a free agent`)
+          .setColor('#FF0000')
+          .setTimestamp();
+
+        if (activeContract) {
+          embed.addFields(
+            { name: 'Previous Salary', value: `$${activeContract.salary.toLocaleString()}`, inline: true },
+            { name: 'Contract Status', value: 'Terminated', inline: true }
+          );
+        }
+
+        await interaction.editReply({ embeds: [embed] });
+
+      } catch (error) {
+        console.error('Error in cut command:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+        await interaction.editReply(`Failed to cut player: ${errorMessage}`);
+      }
+    },
+  }
 ];

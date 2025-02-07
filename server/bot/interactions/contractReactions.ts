@@ -24,12 +24,21 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
 
     console.log('Processing reaction for message:', message.id);
 
-    // Find contract with this message ID using JSON casting
-    const contract = await db.query.contracts.findFirst({
-      where: sql`CAST(${contracts.metadata}->>'offerMessageId' AS TEXT) = ${message.id}`,
+    // Find contract using a simpler query approach
+    const contracts_list = await db.query.contracts.findMany({
+      where: eq(contracts.status, 'pending'),
       with: {
         player: true,
         team: true,
+      }
+    });
+
+    const contract = contracts_list.find(c => {
+      try {
+        const metadata = JSON.parse(c.metadata || '{}') as ContractMetadata;
+        return metadata.offerMessageId === message.id;
+      } catch {
+        return false;
       }
     });
 
@@ -105,7 +114,7 @@ export async function handleContractReactions(reaction: MessageReaction, user: U
 
           if (teamRole) {
             await member.roles.add(teamRole);
-            console.log('Added team role to player');
+            console.log('Added team role to player:', teamRole.name);
           }
           if (freeAgentRole) {
             await member.roles.remove(freeAgentRole);

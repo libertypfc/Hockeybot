@@ -54,18 +54,28 @@ export async function registerCommands(client: Client) {
     // Create a new Collection for commands
     client.commands = new Collection();
 
-    // Collect all commands from modules
+    // Track command names to prevent duplicates
+    const usedCommandNames = new Set<string>();
     const commands = [];
+
+    // Collect all commands from modules and check for duplicates
     for (const [moduleName, moduleCommands] of Object.entries(CommandModules)) {
       if (Array.isArray(moduleCommands)) {
         for (const command of moduleCommands) {
           if (command?.data && command.execute) {
+            const commandName = command.data.name;
+
+            // Check for duplicate command names
+            if (usedCommandNames.has(commandName)) {
+              console.warn(`Duplicate command name '${commandName}' found in ${moduleName}. Skipping.`);
+              continue;
+            }
+
+            usedCommandNames.add(commandName);
             commands.push(command.data.toJSON());
-            client.commands.set(command.data.name, command);
-          } else if (!command?.data) {
-            console.warn(`Command in module ${moduleName} is missing data`);
-          } else if (!command.execute) {
-            console.warn(`Command in module ${moduleName} is missing execute function`);
+            client.commands.set(commandName, command);
+          } else {
+            console.warn(`Invalid command in module ${moduleName}`);
           }
         }
       }
