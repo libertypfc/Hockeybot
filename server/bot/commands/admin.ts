@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, ChannelType, EmbedBuilder } from 'discord.js';
 import { db } from '@db';
-import { guildSettings, teams } from '@db/schema';
-import { eq, lt, gt } from 'drizzle-orm';
+import { guildSettings, teams, contracts, players } from '@db/schema';
+import { eq } from 'drizzle-orm';
 
 export const AdminCommands = [
   {
@@ -56,12 +56,12 @@ export const AdminCommands = [
 
         await db.insert(guildSettings)
           .values({
-            guildId: interaction.guildId!,
-            welcomeChannelId: channel.id,
+            guild_id: interaction.guildId!,
+            welcome_channel_id: channel.id,
           })
           .onConflictDoUpdate({
-            target: guildSettings.guildId,
-            set: { welcomeChannelId: channel.id },
+            target: [guildSettings.guild_id],
+            set: { welcome_channel_id: channel.id },
           });
 
         await interaction.editReply(`Welcome messages will now be sent to ${channel}`);
@@ -95,12 +95,12 @@ export const AdminCommands = [
 
         await db.insert(guildSettings)
           .values({
-            guildId: interaction.guildId!,
-            capNotificationChannelId: channel.id,
+            guild_id: interaction.guildId!,
+            cap_notification_channel_id: channel.id,
           })
           .onConflictDoUpdate({
-            target: guildSettings.guildId,
-            set: { capNotificationChannelId: channel.id },
+            target: [guildSettings.guild_id],
+            set: { cap_notification_channel_id: channel.id },
           });
 
         await interaction.editReply(`Salary cap notifications will now be sent to ${channel}`);
@@ -121,46 +121,46 @@ export async function checkCapCompliance(client: any) {
     });
 
     const settings = await db.query.guildSettings.findFirst();
-    if (!settings?.capNotificationChannelId) return;
+    if (!settings?.cap_notification_channel_id) return;
 
-    const notificationChannel = await client.channels.fetch(settings.capNotificationChannelId);
+    const notificationChannel = await client.channels.fetch(settings.cap_notification_channel_id);
     if (!notificationChannel) return;
 
     for (const team of allTeams) {
       const activeContracts = await db.select({
-        playerId: contracts.playerId,
+        playerId: contracts.player_id,
         salary: contracts.salary,
       })
-      .from(contracts)
-      .where(eq(contracts.teamId, team.id));
+        .from(contracts)
+        .where(eq(contracts.team_id, team.id));
 
       // Calculate total salary excluding exempt players
       const totalSalary = activeContracts.reduce((sum, contract) => {
         const player = team.players.find(p => p.id === contract.playerId);
-        return sum + (player?.salaryExempt ? 0 : contract.salary);
+        return sum + (player?.salary_exempt ? 0 : contract.salary);
       }, 0);
 
-      if (totalSalary < team.capFloor) {
+      if (totalSalary < (team.cap_floor || 0)) {
         const embed = new EmbedBuilder()
           .setTitle('⚠️ Salary Cap Floor Alert')
           .setDescription(`${team.name} is below the salary cap floor!`)
           .addFields(
             { name: 'Current Total Salary', value: `$${totalSalary.toLocaleString()}` },
-            { name: 'Cap Floor', value: `$${team.capFloor.toLocaleString()}` },
-            { name: 'Amount Below Floor', value: `$${(team.capFloor - totalSalary).toLocaleString()}` }
+            { name: 'Cap Floor', value: `$${team.cap_floor?.toLocaleString()}` },
+            { name: 'Amount Below Floor', value: `$${((team.cap_floor || 0) - totalSalary).toLocaleString()}` }
           )
           .setColor('#FF9900')
           .setTimestamp();
 
         await notificationChannel.send({ embeds: [embed] });
-      } else if (totalSalary > team.salaryCap) {
+      } else if (totalSalary > (team.salary_cap || 0)) {
         const embed = new EmbedBuilder()
           .setTitle('🚨 Salary Cap Exceeded')
           .setDescription(`${team.name} is over the salary cap!`)
           .addFields(
             { name: 'Current Total Salary', value: `$${totalSalary.toLocaleString()}` },
-            { name: 'Salary Cap', value: `$${team.salaryCap.toLocaleString()}` },
-            { name: 'Amount Over Cap', value: `$${(totalSalary - team.salaryCap).toLocaleString()}` }
+            { name: 'Salary Cap', value: `$${team.salary_cap?.toLocaleString()}` },
+            { name: 'Amount Over Cap', value: `$${(totalSalary - (team.salary_cap || 0)).toLocaleString()}` }
           )
           .setColor('#FF0000')
           .setTimestamp();

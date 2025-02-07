@@ -48,6 +48,40 @@ export async function startBot(): Promise<Client> {
       }
     });
 
+    // Add interaction handler for slash commands
+    client.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.isChatInputCommand()) return;
+
+      const command = client.commands.get(interaction.commandName);
+      if (!command) {
+        console.error(`No command matching ${interaction.commandName} was found.`);
+        await interaction.reply({
+          content: 'This command is not available.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      try {
+        await command.execute(interaction);
+      } catch (error) {
+        console.error(`Error executing ${interaction.commandName}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'An error occurred while executing this command.';
+
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({
+            content: `There was an error executing this command: ${errorMessage}`,
+            ephemeral: true
+          });
+        } else {
+          await interaction.reply({
+            content: `There was an error executing this command: ${errorMessage}`,
+            ephemeral: true
+          });
+        }
+      }
+    });
+
     client.on(Events.Error, (error) => {
       console.error('Discord client error:', error);
       client.connectionState = 'error';
