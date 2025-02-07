@@ -157,17 +157,10 @@ export const OrganizationCommands = [
       await interaction.deferReply();
 
       try {
-        const conferenceData = await db.query.conferences.findMany({
-          with: {
-            divisions: {
-              with: {
-                teams: true,
-              },
-            },
-          },
-        });
+        // First, get all conferences
+        const confs = await db.select().from(conferences);
 
-        if (conferenceData.length === 0) {
+        if (confs.length === 0) {
           return interaction.editReply('No conferences found.');
         }
 
@@ -175,16 +168,25 @@ export const OrganizationCommands = [
           .setTitle('League Organization')
           .setColor('#0099ff');
 
-        for (const conference of conferenceData) {
+        // For each conference, get its divisions and teams
+        for (const conf of confs) {
+          const divs = await db.select()
+            .from(divisions)
+            .where(eq(divisions.conferenceId, conf.id));
+
           let conferenceText = '';
 
-          for (const division of conference.divisions) {
-            conferenceText += `\n__${division.name} Division__\n`;
+          for (const div of divs) {
+            const teamsInDiv = await db.select()
+              .from(teams)
+              .where(eq(teams.divisionId, div.id));
 
-            if (division.teams && division.teams.length === 0) {
+            conferenceText += `\n__${div.name} Division__\n`;
+
+            if (teamsInDiv.length === 0) {
               conferenceText += '• No teams assigned\n';
-            } else if (division.teams) {
-              division.teams.forEach(team => {
+            } else {
+              teamsInDiv.forEach(team => {
                 conferenceText += `• ${team.name}\n`;
               });
             }
@@ -192,7 +194,7 @@ export const OrganizationCommands = [
 
           if (conferenceText) {
             embed.addFields({
-              name: `${conference.name} Conference`,
+              name: `${conf.name} Conference`,
               value: conferenceText || 'No divisions',
             });
           }
@@ -206,4 +208,4 @@ export const OrganizationCommands = [
       }
     },
   },
-];
+].filter(Boolean);
