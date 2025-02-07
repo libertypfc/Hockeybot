@@ -34,7 +34,7 @@ export const ContractCommands = [
         subcommand
           .setName('elc')
           .setDescription('Offer an Entry Level Contract to a player')
-          .addUserOption(option => 
+          .addUserOption(option =>
             option.setName('player')
               .setDescription('The player to offer the ELC to')
               .setRequired(true))
@@ -46,7 +46,7 @@ export const ContractCommands = [
         subcommand
           .setName('custom')
           .setDescription('Offer a custom contract to a player')
-          .addUserOption(option => 
+          .addUserOption(option =>
             option.setName('player')
               .setDescription('The player to offer the contract to')
               .setRequired(true))
@@ -84,9 +84,9 @@ export const ContractCommands = [
           salary_cap: teams.salary_cap,
           available_cap: teams.available_cap,
         })
-        .from(teams)
-        .where(eq(teams.name, teamRole.name))
-        .then(rows => rows[0]);
+          .from(teams)
+          .where(eq(teams.name, teamRole.name))
+          .then(rows => rows[0]);
 
         if (!team) {
           return interaction.editReply('Invalid team: Make sure the team exists in the database');
@@ -211,17 +211,27 @@ export const ContractCommands = [
             )
             .setFooter({ text: 'Check the offer in the server and react with ✅ to accept or ❌ to decline' });
 
+          // Send the initial reply to get the message URL
+          const replyMessage = await interaction.editReply({
+            content: `Contract offer sent to ${user}. They have been notified via DM.`,
+            embeds: [embed],
+          });
+
+          // Get the message URL and add it to the DM embed
+          if ('url' in replyMessage) {
+            dmEmbed.addFields({
+              name: 'Contract Location',
+              value: `[Click here to view the contract offer](${replyMessage.url})`,
+              inline: false
+            });
+          }
+
           await user.send({ embeds: [dmEmbed] });
         } catch (error) {
           console.warn(`Could not send DM to ${user.tag}`, error);
         }
 
-        // Send the message in the channel and add reactions
-        const replyMessage = await interaction.editReply({
-          content: `Contract offer sent to ${user}. They have been notified via DM.`,
-          embeds: [embed],
-        });
-
+        // Add reactions to the message
         if ('react' in replyMessage) {
           await Promise.all([
             replyMessage.react('✅'),
