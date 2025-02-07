@@ -20,42 +20,6 @@ export const CommandModules = {
   OrganizationCommands,
 };
 
-// Track registered command names globally
-const registeredCommands = new Map<string, {
-  data: SlashCommandBuilder;
-  execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
-}>();
-
-function validateAndRegisterCommand(command: any, moduleName: string) {
-  if (!command.data || !(command.data instanceof SlashCommandBuilder)) {
-    console.warn(`Skipping invalid command in ${moduleName}: ${command.data?.name || 'unknown'}`);
-    return false;
-  }
-
-  const commandName = command.data.name;
-  if (registeredCommands.has(commandName)) {
-    console.warn(`Duplicate command '${commandName}' found in ${moduleName}, skipping...`);
-    return false;
-  }
-
-  // Additional validation for subcommands
-  if (command.data.options?.some((opt: any) => opt.type === 1)) { // 1 is SUB_COMMAND type
-    const subcommandNames = new Set<string>();
-    for (const option of command.data.options) {
-      if (option.type === 1) {
-        if (subcommandNames.has(option.name)) {
-          console.warn(`Duplicate subcommand '${option.name}' found in command '${commandName}', skipping entire command...`);
-          return false;
-        }
-        subcommandNames.add(option.name);
-      }
-    }
-  }
-
-  registeredCommands.set(commandName, command);
-  return true;
-}
-
 export async function registerCommands(client: Client) {
   if (!client.user) {
     throw new Error('Client user is not available');
@@ -63,7 +27,6 @@ export async function registerCommands(client: Client) {
 
   // Clear any existing commands
   client.commands = new Collection();
-  registeredCommands.clear();
 
   console.log('Starting command registration process...');
 
@@ -82,6 +45,9 @@ export async function registerCommands(client: Client) {
     { name: 'Organization', commands: OrganizationCommands },
   ];
 
+  // Collect all valid commands
+  const validCommands = new Map<string, any>();
+
   // Register commands from each module
   for (const module of commandModules) {
     console.log(`Processing ${module.name} commands...`);
@@ -90,38 +56,27 @@ export async function registerCommands(client: Client) {
       continue;
     }
 
-    // Filter out duplicate commands within the same module
-    const moduleCommands = new Map<string, any>();
+    // Filter out invalid commands and duplicates
     for (const command of module.commands) {
       if (!command.data?.name) continue;
 
-      if (moduleCommands.has(command.data.name)) {
-        console.warn(`Duplicate command '${command.data.name}' found within ${module.name} module, keeping first instance...`);
-        continue;
-      }
-      moduleCommands.set(command.data.name, command);
-    }
-
-    // Register filtered commands
-    for (const [commandName, command] of moduleCommands) {
-      if (uniqueCommandNames.has(commandName)) {
-        console.warn(`Command '${commandName}' already registered by another module, skipping...`);
+      // Skip if command is already registered
+      if (validCommands.has(command.data.name)) {
+        console.warn(`Duplicate command '${command.data.name}' found, skipping...`);
         continue;
       }
 
-      if (validateAndRegisterCommand(command, module.name)) {
-        uniqueCommandNames.add(commandName);
-        console.log(`Registered command: ${commandName} from ${module.name}`);
+      // Validate command structure
+      if (!(command.data instanceof SlashCommandBuilder)) {
+        console.warn(`Invalid command structure for '${command.data.name}', skipping...`);
+        continue;
       }
+
+      // Add to valid commands
+      validCommands.set(command.data.name, command);
+      console.log(`Registered command: ${command.data.name} from ${module.name}`);
     }
   }
-
-  // Convert registered commands to Collection for Discord.js
-  for (const [name, command] of registeredCommands) {
-    client.commands.set(name, command);
-  }
-
-  console.log(`Successfully processed ${registeredCommands.size} unique commands`);
 
   // Register commands with Discord API
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
@@ -137,9 +92,8 @@ export async function registerCommands(client: Client) {
       throw new Error('Bot is not in any guilds. Please add the bot to a server first.');
     }
 
-    // Prepare command data once
-    const commandData = Array.from(registeredCommands.values())
-      .map(command => command.data.toJSON());
+    // Prepare command data
+    const commandData = Array.from(validCommands.values()).map(cmd => cmd.data.toJSON());
 
     // Register commands for each guild
     for (const guild of guilds) {
@@ -158,6 +112,11 @@ export async function registerCommands(client: Client) {
       );
 
       console.log(`Successfully registered commands in guild ${guild.id}`);
+    }
+
+    // Set commands in client.commands Collection
+    for (const [name, command] of validCommands) {
+      client.commands.set(name, command);
     }
 
     console.log('Successfully registered application (/) commands in all guilds.');
