@@ -217,27 +217,23 @@ export const ContractCommands = [
             embeds: [embed],
           });
 
-          // Get the message URL and add it to the DM embed
-          if ('url' in replyMessage) {
+          // Add message URL to the DM embed
+          const messageUrl = replyMessage.url;
+          if (messageUrl) {
             dmEmbed.addFields({
               name: 'Contract Location',
-              value: `[Click here to view the contract offer](${replyMessage.url})`,
+              value: `[Click here to view the contract offer](${messageUrl})`,
               inline: false
             });
           }
 
           await user.send({ embeds: [dmEmbed] });
-        } catch (error) {
-          console.warn(`Could not send DM to ${user.tag}`, error);
-        }
 
-        // Add reactions to the message
-        if ('react' in replyMessage) {
-          await Promise.all([
-            replyMessage.react('✅'),
-            replyMessage.react('❌'),
-          ]);
+          // Add reactions after sending the DM
+          await replyMessage.react('✅');
+          await replyMessage.react('❌');
 
+          // Update contract metadata with message ID
           if ('id' in replyMessage) {
             await db.update(contracts)
               .set({
@@ -248,7 +244,11 @@ export const ContractCommands = [
               })
               .where(eq(contracts.id, contract.id));
           }
+
+        } catch (error) {
+          console.warn(`Could not send DM to ${user.tag}`, error);
         }
+
 
       } catch (error) {
         console.error('Error in contract offer command:', error);

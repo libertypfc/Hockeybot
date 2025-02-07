@@ -39,9 +39,12 @@ export async function registerCommands(client: Client) {
   client.commands = new Collection();
   registeredCommands.clear();
 
-  // Process all command modules
   console.log('Starting command registration process...');
 
+  // Create a Set to track unique command names
+  const uniqueCommandNames = new Set<string>();
+
+  // Process all command modules
   const commandModules = [
     { name: 'Team', commands: TeamCommands },
     { name: 'Contract', commands: ContractCommands },
@@ -62,8 +65,17 @@ export async function registerCommands(client: Client) {
     }
 
     for (const command of module.commands) {
+      if (!command.data) continue;
+
+      const commandName = command.data.name;
+      if (uniqueCommandNames.has(commandName)) {
+        console.warn(`Duplicate command '${commandName}' found in ${module.name} module, skipping...`);
+        continue;
+      }
+
       if (validateAndRegisterCommand(command)) {
-        console.log(`Registered command: ${command.data.name}`);
+        uniqueCommandNames.add(commandName);
+        console.log(`Registered command: ${commandName}`);
       }
     }
   }
