@@ -1,5 +1,6 @@
-import { Client, GatewayIntentBits, Events, Collection, SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, SlashCommandBuilder, ChatInputCommandInteraction, Partials } from 'discord.js';
 import { registerCommands } from './commands/index';
+import { handleContractReactions } from './interactions/contractReactions';
 
 declare module 'discord.js' {
   interface Client {
@@ -18,7 +19,9 @@ export const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
   ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
 client.commands = new Collection();
@@ -46,6 +49,12 @@ export async function startBot(): Promise<Client> {
       } catch (error) {
         console.error('Failed to register commands:', error);
       }
+    });
+
+    // Add reaction handlers
+    client.on(Events.MessageReactionAdd, async (reaction, user) => {
+      if (user.bot) return; // Ignore bot reactions
+      await handleContractReactions(reaction, user);
     });
 
     // Add interaction handler for slash commands
