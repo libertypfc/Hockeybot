@@ -39,17 +39,17 @@ export const WaiversCommands = [
         // Save or update settings
         await db.insert(waiverSettings)
           .values({
-            guildId: guild.id,
-            notificationChannelId: channel.id,
-            scoutRoleId: scoutRole.id,
-            gmRoleId: gmRole.id,
+            guild_id: guild.id,
+            notification_channel_id: channel.id,
+            scout_role_id: scoutRole.id,
+            gm_role_id: gmRole.id,
           })
           .onConflictDoUpdate({
             target: waiverSettings.guildId,
             set: {
-              notificationChannelId: channel.id,
-              scoutRoleId: scoutRole.id,
-              gmRoleId: gmRole.id,
+              notification_channel_id: channel.id,
+              scout_role_id: scoutRole.id,
+              gm_role_id: gmRole.id,
             },
           });
 
@@ -187,26 +187,21 @@ export const WaiversCommands = [
           return interaction.editReply('Player does not have an active contract');
         }
 
-        // Calculate waiver period
-        const startTime = new Date();
-        const endTime = new Date();
-        endTime.setHours(endTime.getHours() + 48); // 48 hour default period
-
         // Create waiver entry
-        await db.insert(waivers).values({
-          playerId: player.id,
-          fromTeamId: player.currentTeamId,
-          startTime: startTime,
-          endTime: endTime,
-          contractId: activeContract.id,
-          salary: activeContract.salary,
-        });
+        await db.insert(waivers)
+          .values({
+            player_id: player.id,
+            from_team_id: player.currentTeamId,
+            start_time: new Date(),
+            end_time: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48 hours from now
+            status: 'active',
+          });
 
         // Update team's available cap if player is not salary exempt
         if (!player.salaryExempt) {
           await db.update(teams)
             .set({
-              availableCap: sql`${teams.availableCap} - ${activeContract.salary}`,
+              available_cap: sql`${teams.available_cap} - ${activeContract.salary}`,
             })
             .where(eq(teams.id, player.currentTeamId));
         }
@@ -239,7 +234,7 @@ export const WaiversCommands = [
           .setTitle('🚨 Player Added to Waivers')
           .setDescription(`${user} has been placed on waivers by ${player.currentTeam?.name}`)
           .addFields(
-            { name: 'Waiver Period', value: `Ends <t:${Math.floor(endTime.getTime() / 1000)}:R>` },
+            { name: 'Waiver Period', value: `Ends <t:${Math.floor(Date.now() / 1000 + 48 * 60 * 60)}:R>` },
             { name: 'Salary', value: `$${activeContract.salary.toLocaleString()}` },
             { name: 'Status', value: player.salaryExempt ? '🏷️ Salary Exempt' : '💰 Counts Against Cap' }
           )

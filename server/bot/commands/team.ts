@@ -82,6 +82,7 @@ export const TeamCommands = [
             guild_id: guildId,
             salary_cap: 82500000,
             available_cap: 82500000,
+            cap_floor: 60375000, // 73.2% of the cap
           })
           .returning();
 
@@ -959,32 +960,22 @@ export const TeamCommands = [
   },
 ];
 
+// Helper function for assigning free agent role
 async function assignFreeAgentRole(interaction: ChatInputCommandInteraction, playerId: number) {
   try {
-    const player = await db.select({
-      discordId: players.discordId,
-    })
-    .from(players)
-    .where(eq(players.id, playerId))
-    .then(rows => rows[0]);
+    const player = await db.query.players.findFirst({
+      where: eq(players.id, playerId),
+    });
 
     if (!player || !interaction.guild) return;
 
     const member = await interaction.guild.members.fetch(player.discordId);
-    const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === "Free Agent");
+    const freeAgentRole = interaction.guild.roles.cache.find(role => role.name === 'Free Agent');
 
-    if (!freeAgentRole) {
-      // Create Free Agent role if it doesn't exist
-      await interaction.guild.roles.create({
-        name: "Free Agent",
-        color: "#808080", // Gray color
-        reason: "Required for free agent players"
-      });
-    }
-
-    if (member && freeAgentRole) {
+    if (freeAgentRole && member) {
       await member.roles.add(freeAgentRole);
     }
   } catch (error) {
-    console.error('Error assigning Free Agent role:', error);  }
+    console.error('Error assigning free agent role:', error);
+  }
 }
