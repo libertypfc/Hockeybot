@@ -1,10 +1,10 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits } from 'discord.js';
 import { db } from '@db';
 import { teams, players, contracts, waivers } from '@db/schema';
+import { eq } from 'drizzle-orm';
 
 const REQUIRED_ROLE_NAME = "Database Manager";
 
-// Combine all database commands into a single command with subcommands
 export const DatabaseCommands = [
   {
     data: new SlashCommandBuilder()
@@ -30,6 +30,36 @@ export const DatabaseCommands = [
         subcommand
           .setName('purgewaivers')
           .setDescription('WARNING: Removes all waivers from the database')
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('addteam')
+          .setDescription('Add a team directly to database')
+          .addStringOption(option =>
+            option.setName('name')
+              .setDescription('Team name')
+              .setRequired(true))
+          .addStringOption(option =>
+            option.setName('categoryid')
+              .setDescription('Discord category ID')
+              .setRequired(true))
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('addplayer')
+          .setDescription('Add a player with contract to team')
+          .addUserOption(option =>
+            option.setName('player')
+              .setDescription('The player to add')
+              .setRequired(true))
+          .addRoleOption(option =>
+            option.setName('team')
+              .setDescription('The team to add player to')
+              .setRequired(true))
+          .addIntegerOption(option =>
+            option.setName('salary')
+              .setDescription('Player salary')
+              .setRequired(true))
       ),
 
     async execute(interaction: ChatInputCommandInteraction) {
@@ -44,31 +74,101 @@ export const DatabaseCommands = [
         }
 
         const member = await interaction.guild.members.fetch(interaction.user.id);
-        console.log('Member fetched:', member.user.tag);
-
-        // Log available roles
-        const availableRoles = member.roles.cache.map(role => role.name);
-        console.log('Available roles:', availableRoles.join(', '));
-
         const hasRequiredRole = member.roles.cache.some(role => role.name === REQUIRED_ROLE_NAME);
-        console.log('Has required role:', hasRequiredRole);
 
         if (!hasRequiredRole) {
-          const errorMessage = `You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.\n\n` +
-            `Please ask a server administrator to:\n` +
-            `1. Create a role named exactly "${REQUIRED_ROLE_NAME}"\n` +
-            `2. Assign this role to users who should have database management permissions`;
-
-          console.log('Sending role requirement error to user:', interaction.user.tag);
+          const errorMessage = `You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.`;
           return await interaction.editReply(errorMessage);
         }
 
         const subcommand = interaction.options.getSubcommand();
-        console.log('Executing subcommand:', subcommand);
 
         switch (subcommand) {
+          case 'addteam': {
+            const name = interaction.options.getString('name', true);
+            const categoryId = interaction.options.getString('categoryid', true);
+            const guildId = interaction.guildId!;
+
+            const [team] = await db.insert(teams)
+              .values({
+                name,
+                guildId,
+                discordCategoryId: categoryId,
+                salaryCap: 82500000,
+                availableCap: 82500000,
+                capFloor: 60375000,
+                metadata: JSON.stringify({})
+              })
+              .returning();
+
+            await interaction.editReply(`Team "${name}" added to database with ID ${team.id}`);
+            break;
+          }
+
+          case 'addplayer': {
+            const user = interaction.options.getUser('player', true);
+            const teamRole = interaction.options.getRole('team', true);
+            const salary = interaction.options.getInteger('salary', true);
+
+            // Get team
+            const team = await db.query.teams.findFirst({
+              where: eq(teams.name, teamRole.name),
+            });
+
+            if (!team) {
+              return interaction.editReply('Team not found in database');
+            }
+
+            // Create or get player
+            let player = await db.query.players.findFirst({
+              where: eq(players.discordId, user.id),
+            });
+
+            if (!player) {
+              const [newPlayer] = await db.insert(players)
+                .values({
+                  discordId: user.id,
+                  username: user.username,
+                  currentTeamId: team.id,
+                  status: 'signed',
+                  salaryExempt: false,
+                  welcomeMessageSent: true,
+                })
+                .returning();
+              player = newPlayer;
+            } else {
+              await db.update(players)
+                .set({
+                  currentTeamId: team.id,
+                  status: 'signed'
+                })
+                .where(eq(players.id, player.id));
+            }
+
+            // Create contract
+            const startDate = new Date();
+            const endDate = new Date();
+            endDate.setDate(endDate.getDate() + 210); // 30 weeks
+
+            await db.insert(contracts)
+              .values({
+                playerId: player.id,
+                teamId: team.id,
+                salary: salary * 1000000, // Convert to actual dollars
+                lengthInDays: 210,
+                startDate,
+                endDate,
+                status: 'active',
+                metadata: JSON.stringify({}),
+              });
+
+            await interaction.editReply(
+              `Added ${user.username} to ${team.name} with $${salary}M salary`
+            );
+            break;
+          }
+
           case 'purgeall':
-            // Delete in order to maintain referential integrity
             await db.delete(contracts);
             await db.delete(waivers);
             await db.delete(players);
@@ -98,7 +198,6 @@ export const DatabaseCommands = [
         console.error('Error in database command:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
 
-        // Make sure we have a valid interaction to reply to
         if (interaction.deferred) {
           await interaction.editReply(`Failed to execute command: ${errorMessage}`);
         } else {
