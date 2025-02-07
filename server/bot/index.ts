@@ -2,7 +2,7 @@ import { Client, GatewayIntentBits, Events, Collection, EmbedBuilder, TextChanne
 import { db } from '@db';
 import { players, contracts, teams, guildSettings } from '@db/schema';
 import { eq, and } from 'drizzle-orm';
-import { registerCommands } from './commands';
+//import { registerCommands } from './commands'; // Removed - now handled in commands/index.ts
 import { checkCapCompliance } from './commands/admin';
 import { initializeAchievements, checkUptimeAchievements } from './achievements';
 
@@ -424,7 +424,7 @@ export class DiscordBot extends Client {
         await initializeAchievements();
         this.log('Achievements initialized', 'info');
 
-        await registerCommands(this);
+        //await registerCommands(this); // Removed - now handled in commands/index.ts
         this.log('Commands registered successfully', 'info');
         this.hasRegisteredCommands = true;
       }

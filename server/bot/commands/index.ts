@@ -31,31 +31,6 @@ export async function registerCommands(client: Client) {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
 
   try {
-    // Get all guilds the bot is in
-    const guilds = Array.from(client.guilds.cache.values());
-    if (guilds.length === 0) {
-      throw new Error('Bot is not in any guilds');
-    }
-
-    console.log(`Bot is in ${guilds.length} guilds`);
-
-    // First, clear ALL commands from each guild
-    for (const guild of guilds) {
-      try {
-        console.log(`Clearing all commands from guild ${guild.id}...`);
-        await rest.put(
-          Routes.applicationGuildCommands(client.user.id, guild.id),
-          { body: [] }
-        );
-        console.log(`Successfully cleared all commands from guild ${guild.id}`);
-      } catch (error) {
-        console.error(`Failed to clear commands from guild ${guild.id}:`, error);
-      }
-    }
-
-    // Wait a moment to ensure commands are cleared
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
     // Create a new Collection for commands
     client.commands = new Collection();
 
@@ -100,27 +75,29 @@ export async function registerCommands(client: Client) {
 
     console.log(`Prepared ${commandData.length} unique commands for registration`);
 
-    // Register commands to each guild
-    for (const guild of guilds) {
-      try {
-        console.log(`Registering ${commandData.length} commands to guild ${guild.id}`);
-        await rest.put(
-          Routes.applicationGuildCommands(client.user.id, guild.id),
-          { body: commandData }
-        );
-        console.log(`Successfully registered commands in guild ${guild.id}`);
-      } catch (error) {
-        console.error(`Error registering commands to guild ${guild.id}:`, error);
-        continue;
-      }
-    }
+    // First, clear global commands
+    console.log('Clearing global application commands...');
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: [] }
+    );
+
+    // Wait a moment to ensure commands are cleared
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Register commands globally
+    console.log(`Registering ${commandData.length} commands globally...`);
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commandData }
+    );
 
     // Set up the client.commands Collection
     for (const [name, command] of uniqueCommands) {
       client.commands.set(name, command);
     }
 
-    console.log(`Successfully registered ${uniqueCommands.size} unique commands across all guilds`);
+    console.log(`Successfully registered ${uniqueCommands.size} unique commands globally`);
     return true;
   } catch (error) {
     console.error('Error in command registration:', error);
