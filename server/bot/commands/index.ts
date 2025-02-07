@@ -8,7 +8,6 @@ import { AdminCommands } from './admin';
 import { SeasonCommands } from './season';
 import { OrganizationCommands } from './organization';
 
-// Export all command modules for use in the bot
 export const CommandModules = {
   TeamCommands,
   ContractCommands,
@@ -39,10 +38,8 @@ export async function registerCommands(client: Client) {
     // Create a new Collection for commands
     client.commands = new Collection();
 
-    // Collect and validate unique commands
-    const uniqueCommands = new Map<string, any>();
-    const registeredCommandNames = new Set<string>();
-    const duplicateCommands = new Set<string>();
+    // Collect valid commands
+    const validCommands = new Map<string, any>();
 
     // Process each command module
     for (const [moduleName, moduleCommands] of Object.entries(CommandModules)) {
@@ -51,103 +48,38 @@ export async function registerCommands(client: Client) {
         continue;
       }
 
-      console.log(`Processing commands from module: ${moduleName}`);
-
       for (const command of moduleCommands) {
-        // Validate command structure
-        if (!command?.data?.name || !command.data.description || !(command.data instanceof SlashCommandBuilder)) {
-          console.warn(`Invalid command structure in ${moduleName}, missing required properties`);
-          continue;
-        }
-
-        if (typeof command.execute !== 'function') {
-          console.warn(`Invalid command in ${moduleName}: missing execute function`);
+        if (!command?.data?.name || !command.execute) {
+          console.warn(`Invalid command in ${moduleName}, skipping...`);
           continue;
         }
 
         const commandName = command.data.name;
-
-        // Track duplicates
-        if (registeredCommandNames.has(commandName)) {
-          duplicateCommands.add(commandName);
-          console.warn(`Duplicate command name '${commandName}' found in ${moduleName}, skipping...`);
-          continue;
-        }
-
-        // Register valid commands
-        console.log(`Registering command: ${commandName} from ${moduleName}`);
-        registeredCommandNames.add(commandName);
-        uniqueCommands.set(commandName, command);
-
-        // Set up the client.commands Collection immediately
+        validCommands.set(commandName, command);
         client.commands.set(commandName, command);
       }
     }
 
-    // Log duplicate commands if any were found
-    if (duplicateCommands.size > 0) {
-      console.warn('Found duplicate commands:', Array.from(duplicateCommands));
-    }
+    // Convert commands to API format
+    const commandData = Array.from(validCommands.values()).map(cmd => cmd.data.toJSON());
+    console.log(`Prepared ${commandData.length} commands for registration`);
 
-    // Convert commands to Discord API format with proper error handling
-    const commandData = [];
-    for (const cmd of uniqueCommands.values()) {
-      try {
-        const json = cmd.data.toJSON();
-        console.log(`Prepared command for API: ${json.name}`);
-        commandData.push(json);
-      } catch (error) {
-        console.error(`Failed to convert command ${cmd.data.name} to JSON:`, error);
-      }
-    }
+    // Clear existing commands first
+    console.log('Clearing existing commands...');
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for clear to propagate
 
-    console.log(`Prepared ${commandData.length} unique commands for registration`);
-
-    // Clear existing commands first with retry logic
-    const maxRetries = 3;
-    let retryCount = 0;
-    let cleared = false;
-
-    while (!cleared && retryCount < maxRetries) {
-      try {
-        console.log(`Attempt ${retryCount + 1} to clear existing commands...`);
-        await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
-        cleared = true;
-        console.log('Successfully cleared existing commands');
-      } catch (error) {
-        retryCount++;
-        if (retryCount === maxRetries) {
-          throw new Error(`Failed to clear commands after ${maxRetries} attempts`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-    }
-
-    // Register new commands with retry logic
-    retryCount = 0;
-    let registered = false;
-
-    while (!registered && retryCount < maxRetries) {
-      try {
-        console.log(`Attempt ${retryCount + 1} to register ${commandData.length} commands...`);
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commandData });
-        registered = true;
-        console.log(`Successfully registered ${commandData.length} commands`);
-      } catch (error) {
-        retryCount++;
-        if (retryCount === maxRetries) {
-          throw new Error(`Failed to register commands after ${maxRetries} attempts`);
-        }
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-    }
+    // Register new commands
+    console.log('Registering new commands...');
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commandData });
+    console.log(`Successfully registered ${commandData.length} commands`);
 
     hasRegisteredGlobally = true;
     return true;
 
   } catch (error) {
     console.error('Error in command registration:', error);
-    hasRegisteredGlobally = false; // Reset flag on error
+    hasRegisteredGlobally = false;
     throw error;
   }
 }

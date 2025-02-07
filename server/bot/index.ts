@@ -20,14 +20,12 @@ export class DiscordBot extends Client {
   private isConnecting: boolean = false;
   private reconnectAttempt: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 10;
-  private readonly INITIAL_CONNECT_TIMEOUT = 30000;
+  private readonly INITIAL_CONNECT_TIMEOUT = 60000; // Increased to 60 seconds
   private readonly MAX_CONNECT_TIMEOUT = 300000;
-  private readonly INITIAL_RECONNECT_DELAY = 1000;
+  private readonly INITIAL_RECONNECT_DELAY = 5000; // Increased initial delay
   private readonly MAX_RECONNECT_DELAY = 60000;
   private heartbeatInterval?: NodeJS.Timeout;
   private connectionMonitor?: NodeJS.Timeout;
-  private sessionId?: string;
-  private resumeGatewayUrl?: string;
   private hasRegisteredCommands: boolean = false;
 
   constructor() {
@@ -53,11 +51,11 @@ export class DiscordBot extends Client {
           type: 0
         }]
       },
-      failIfNotExists: false,
-      retryLimit: 5,
-      restWsBridgeTimeout: 5000,
-      restRequestTimeout: 30000,
-      waitGuildTimeout: 15000
+      waitGuildTimeout: 15000,
+      rest: {
+        timeout: 60000,
+        retries: 5
+      }
     });
 
     this.commands = new Collection();
@@ -94,9 +92,7 @@ export class DiscordBot extends Client {
     this.ws?.on('close', this.handleWebSocketClose.bind(this));
 
     this.ws?.on('sessionStarted', (data: any) => {
-      this.sessionId = data.session_id;
-      this.resumeGatewayUrl = data.resume_gateway_url;
-      this.log(`Session established: ${this.sessionId}`, 'debug');
+      this.log(`Session established: ${data.session_id}`, 'debug');
     });
 
     this.on(Events.GuildMemberAdd, async (member) => {
@@ -382,8 +378,6 @@ export class DiscordBot extends Client {
       await this.attemptReconnect();
     } else {
       this.log('WebSocket closure requires fresh connection', 'warn');
-      this.sessionId = undefined;
-      this.resumeGatewayUrl = undefined;
       await this.attemptReconnect();
     }
   }
@@ -424,38 +418,45 @@ export class DiscordBot extends Client {
   }
 
   private async handleReady(client: Client) {
-    this.log(`Logged in as ${client.user?.tag}`, 'info');
-    this.reconnectAttempt = 0;
+    this.log('Bot is ready and connected to Discord', 'info');
 
-    this.startHeartbeat();
-    this.startConnectionMonitor();
+    // Reset reconnection counter on successful connection
+    this.reconnectAttempt = 0;
+    this.isConnecting = false;
 
     try {
+      // Initialize achievements first
+      await initializeAchievements();
+      this.log('Achievements initialized', 'info');
+
+      // Register commands with retries
       if (!this.hasRegisteredCommands) {
         await this.registerCommandsWithRetry();
       }
+
+      // Start monitoring systems
+      this.startHeartbeat();
+      this.startConnectionMonitor();
+      this.startPeriodicChecks();
+
     } catch (error) {
-      this.log(`Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-      // Trigger reconnection if command registration fails
+      this.log(`Initialization error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       await this.handleDisconnect();
     }
   }
 
-  private async registerCommandsWithRetry(maxAttempts = 3): Promise<void> {
+  private async registerCommandsWithRetry(maxAttempts = 5): Promise<void> {
     let attempt = 0;
 
     while (attempt < maxAttempts) {
       try {
-        await initializeAchievements();
-        this.log('Achievements initialized', 'info');
+        this.log(`Attempting to register commands (attempt ${attempt + 1}/${maxAttempts})`, 'info');
 
         await registerCommands(this);
-        this.log('Commands registered successfully', 'info');
         this.hasRegisteredCommands = true;
-
-        // Start periodic checks after successful initialization
-        this.startPeriodicChecks();
+        this.log('Commands registered successfully', 'info');
         return;
+
       } catch (error) {
         attempt++;
         this.log(`Command registration attempt ${attempt} failed: ${error}`, 'error');
@@ -464,8 +465,9 @@ export class DiscordBot extends Client {
           throw new Error(`Failed to register commands after ${maxAttempts} attempts`);
         }
 
-        // Exponential backoff
-        await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt), 30000)));
+        // Exponential backoff with maximum delay
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
@@ -606,10 +608,16 @@ export const client = new DiscordBot();
 
 export async function startBot(): Promise<DiscordBot> {
   try {
+    // Verify token exists
+    if (!process.env.DISCORD_TOKEN) {
+      throw new Error('DISCORD_TOKEN is not set in environment variables');
+    }
+
     const success = await client.start();
     if (!success) {
       throw new Error('Failed to start bot');
     }
+
     return client;
   } catch (error) {
     console.error('Bot startup failed:', error);
