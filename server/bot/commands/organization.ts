@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder, ChannelType, PermissionsBitField } from 'discord.js';
 import { db } from '@db';
 import { teams } from '@db/schema';
 import { eq } from 'drizzle-orm';
@@ -21,11 +21,73 @@ export const OrganizationCommands = [
         const name = interaction.options.getString('name', true);
         const guildId = interaction.guildId;
 
-        if (!guildId) {
+        if (!interaction.guild || !guildId) {
           return interaction.editReply('This command must be run in a guild.');
         }
 
-        // Create the team with default values
+        // Create team role first
+        const teamRole = await interaction.guild.roles.create({
+          name: name,
+          color: '#' + Math.floor(Math.random()*16777215).toString(16), // Random color
+          reason: 'New team creation',
+          permissions: [
+            PermissionsBitField.Flags.ViewChannel,
+            PermissionsBitField.Flags.SendMessages,
+            PermissionsBitField.Flags.ReadMessageHistory,
+          ]
+        });
+
+        // Create category for team
+        const category = await interaction.guild.channels.create({
+          name: name,
+          type: ChannelType.GuildCategory,
+          permissionOverwrites: [
+            {
+              id: interaction.guild.roles.everyone.id,
+              deny: [PermissionsBitField.Flags.ViewChannel],
+            },
+            {
+              id: teamRole.id,
+              allow: [
+                PermissionsBitField.Flags.ViewChannel,
+                PermissionsBitField.Flags.SendMessages,
+                PermissionsBitField.Flags.ReadMessageHistory,
+              ],
+            },
+            {
+              id: interaction.guild.members.me!.id, // Bot's permissions
+              allow: [PermissionsBitField.Flags.ViewChannel],
+            }
+          ],
+        });
+
+        // Create team channels
+        const channels = await Promise.all([
+          interaction.guild.channels.create({
+            name: 'announcements',
+            type: ChannelType.GuildText,
+            parent: category.id,
+            permissionOverwrites: [
+              {
+                id: teamRole.id,
+                deny: [PermissionsBitField.Flags.SendMessages],
+                allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ReadMessageHistory],
+              }
+            ]
+          }),
+          interaction.guild.channels.create({
+            name: 'general',
+            type: ChannelType.GuildText,
+            parent: category.id,
+          }),
+          interaction.guild.channels.create({
+            name: 'strategy',
+            type: ChannelType.GuildText,
+            parent: category.id,
+          }),
+        ]);
+
+        // Create the team in database with Discord IDs
         const [team] = await db.insert(teams)
           .values({
             name,
@@ -33,8 +95,14 @@ export const OrganizationCommands = [
             salary_cap: 82500000, // Default salary cap
             available_cap: 82500000,
             cap_floor: 60375000, // 73.2% of cap
-            discord_category_id: '', // Empty string as placeholder
-            metadata: '{}',
+            discord_category_id: category.id,
+            metadata: JSON.stringify({
+              roleId: teamRole.id,
+              channels: channels.map(ch => ({
+                name: ch.name,
+                id: ch.id
+              }))
+            }),
           })
           .returning();
 
@@ -42,10 +110,12 @@ export const OrganizationCommands = [
           .setTitle('Team Created')
           .setDescription(`Team "${name}" has been created successfully.`)
           .addFields(
-            { name: 'Salary Cap', value: `$${team.salary_cap.toLocaleString()}`, inline: true },
-            { name: 'Cap Floor', value: `$${team.cap_floor.toLocaleString()}`, inline: true }
+            { name: 'Salary Cap', value: `$${team.salary_cap?.toLocaleString() ?? 0}`, inline: true },
+            { name: 'Cap Floor', value: `$${team.cap_floor?.toLocaleString() ?? 0}`, inline: true },
+            { name: 'Channels Created', value: channels.map(ch => `<#${ch.id}>`).join('\n'), inline: false },
+            { name: 'Team Role', value: `<@&${teamRole.id}>`, inline: false }
           )
-          .setColor('#00FF00')
+          .setColor(teamRole.color)
           .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
@@ -93,7 +163,7 @@ export const OrganizationCommands = [
         for (const team of guildTeams) {
           embed.addFields({
             name: team.name,
-            value: `Salary Cap: $${team.salaryCap.toLocaleString()}\nCap Floor: $${team.capFloor.toLocaleString()}`,
+            value: `Salary Cap: $${team.salaryCap?.toLocaleString() ?? 0}\nCap Floor: $${team.capFloor?.toLocaleString() ?? 0}`,
             inline: false
           });
         }
