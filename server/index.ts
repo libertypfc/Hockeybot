@@ -1,8 +1,9 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from 'http';
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { setupVite, log } from "./vite";
 import { startBot } from "./bot";
+import path from 'path';
 
 const app = express();
 app.use(express.json());
@@ -45,10 +46,11 @@ async function startApplication() {
   isStarting = true;
 
   try {
-    // Create HTTP server first
+    // Create HTTP server
     const httpServer = createServer(app);
 
     // Initialize routes
+    const port = process.env.PORT ? Number(process.env.PORT) : 3000;
     registerRoutes(app);
 
     // Error handling middleware
@@ -59,37 +61,44 @@ async function startApplication() {
       res.status(status).json({ message });
     });
 
-    // Setup Vite or static serving
-    if (app.get("env") === "development") {
+    // Setup Vite for development or serve static files for production
+    if (process.env.NODE_ENV === "development") {
       try {
         await setupVite(app, httpServer);
       } catch (error) {
         console.error("Failed to setup Vite:", error);
       }
     } else {
-      serveStatic(app);
+      // For production, serve static files from the dist/public directory
+      const distPath = path.resolve(process.cwd(), "dist/public");
+      app.use(express.static(distPath));
+      app.get('*', (_req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
     }
 
-    // Start the HTTP server first
-    const PORT = Number(process.env.PORT) || 5000;
+    // Start the HTTP server
     await new Promise<void>((resolve) => {
-      httpServer.listen(PORT, "0.0.0.0", () => {
-        log(`HTTP server listening on port ${PORT}`, 'startup');
+      httpServer.listen(port, "0.0.0.0", () => {
+        log(`HTTP server listening on port ${port}`, 'startup');
         resolve();
       });
     });
 
-    // Start Discord bot after server is running
-    log('Starting Discord bot...', 'startup');
-    try {
-      await startBot(); // Attempt to start the bot
-      log('Discord bot started successfully', 'startup');
-    } catch (error) {
-      // Log the error but don't throw - allow server to run without bot
-      log(`Warning: Failed to start Discord bot: ${error}`, 'startup');
-      if (error instanceof Error && error.message.includes('Invalid Discord token')) {
-        log('Please check your Discord token configuration', 'startup');
+    // Start Discord bot if token is available
+    if (process.env.DISCORD_TOKEN) {
+      log('Starting Discord bot...', 'startup');
+      try {
+        await startBot();
+        log('Discord bot started successfully', 'startup');
+      } catch (error) {
+        log(`Warning: Failed to start Discord bot: ${error}`, 'startup');
+        if (error instanceof Error && error.message.includes('Invalid Discord token')) {
+          log('Please check your Discord token configuration', 'startup');
+        }
       }
+    } else {
+      log('No Discord token found, skipping bot initialization', 'startup');
     }
 
     return true;

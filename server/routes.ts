@@ -6,8 +6,6 @@ import { teams, players, contracts } from '@db/schema';
 import { eq, and, gte } from 'drizzle-orm';
 
 export function registerRoutes(app: Express): Server {
-  const port = Number(process.env.PORT) || 3000;
-
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
@@ -46,8 +44,7 @@ export function registerRoutes(app: Express): Server {
         const guilds = await client.guilds.fetch();
         const servers = Array.from(guilds.values()).map(guild => ({
           id: guild.id,
-          name: guild.name,
-          memberCount: guild.memberCount || 0  // Use memberCount instead of approximateMemberCount
+          name: guild.name
         }));
 
         if (servers.length === 0) {
@@ -189,15 +186,16 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  // Create HTTP server with consistent port and host binding
+  // Create HTTP server
   const httpServer = createServer(app);
-
+  const port = Number(process.env.PORT) || 3000;
   httpServer.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
-    // Start the bot but don't wait for it
-    startBot().catch(error => {
-      console.error('Failed to start bot:', error);
-    });
+  });
+
+  // Start the bot but don't wait for it
+  startBot().catch(error => {
+    console.error('Failed to start bot:', error);
   });
 
   return httpServer;
