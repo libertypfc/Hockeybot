@@ -43,108 +43,128 @@ export const TeamCommands = [
           components: [row],
         });
 
-        const confirmation = await response.awaitMessageComponent({
-          filter: i => i.user.id === interaction.user.id,
-          time: 30000,
-          componentType: ComponentType.StringSelect,
-        });
+        try {
+          const confirmation = await response.awaitMessageComponent({
+            filter: i => i.user.id === interaction.user.id,
+            time: 30000,
+            componentType: ComponentType.StringSelect,
+          });
 
-        const teamId = parseInt(confirmation.values[0]);
-        const selectedTeam = allTeams.find(t => t.id === teamId);
+          const teamId = parseInt(confirmation.values[0]);
+          const selectedTeam = allTeams.find(t => t.id === teamId);
 
-        if (!selectedTeam) {
-          return confirmation.update({
-            content: 'Selected team not found.',
+          if (!selectedTeam) {
+            return confirmation.update({
+              content: 'Selected team not found.',
+              components: [],
+            });
+          }
+
+          let errors: string[] = [];
+
+          // Get all players before updating
+          const teamPlayers = await db.select({
+            id: players.id,
+          })
+            .from(players)
+            .where(eq(players.current_team_id, teamId));
+
+          // Update players to free agents
+          await db.update(players)
+            .set({
+              current_team_id: null,
+              status: 'free_agent'
+            })
+            .where(eq(players.current_team_id, teamId));
+
+          // Assign Free Agent role to all players
+          for (const player of teamPlayers) {
+            await assignFreeAgentRole(interaction, player.id);
+          }
+
+          // Delete all contracts
+          try {
+            await db.delete(contracts)
+              .where(eq(contracts.team_id, teamId));
+          } catch (error) {
+            errors.push('Failed to delete contracts');
+            console.error('Error deleting contracts:', error);
+          }
+
+          // Delete Discord elements
+          if (interaction.guild) {
+            try {
+              const category = await interaction.guild.channels.cache.get(selectedTeam.discord_category_id);
+              if (category) {
+                const channelsInCategory = interaction.guild.channels.cache.filter(
+                  channel => channel.parentId === category.id
+                );
+
+                await Promise.all(
+                  channelsInCategory.map(channel => channel.delete())
+                );
+
+                await category.delete();
+              }
+            } catch (error) {
+              errors.push('Failed to delete some Discord channels');
+              console.error('Error deleting channels:', error);
+            }
+
+            try {
+              const teamRole = interaction.guild.roles.cache.find(role => role.name === selectedTeam.name);
+              if (teamRole) {
+                await teamRole.delete();
+              }
+            } catch (error) {
+              errors.push('Failed to delete team role');
+              console.error('Error deleting role:', error);
+            }
+          }
+
+          // Finally, delete the team
+          try {
+            await db.delete(teams)
+              .where(eq(teams.id, teamId));
+          } catch (error) {
+            errors.push('Failed to delete team from database');
+            console.error('Error deleting team from database:', error);
+            throw error;
+          }
+
+          const successMessage = `Team ${selectedTeam.name} has been deleted.`;
+          const errorMessage = errors.length > 0
+            ? `\nWarning: Some operations failed: ${errors.join(', ')}`
+            : '';
+
+          await confirmation.update({
+            content: successMessage + errorMessage,
             components: [],
           });
-        }
 
-        let errors: string[] = [];
-
-        // Get all players before updating
-        const teamPlayers = await db.select({
-          id: players.id,
-        })
-          .from(players)
-          .where(eq(players.current_team_id, teamId));
-
-        // Update players to free agents
-        await db.update(players)
-          .set({
-            current_team_id: null,
-            status: 'free_agent'
-          })
-          .where(eq(players.current_team_id, teamId));
-
-        // Assign Free Agent role to all players
-        for (const player of teamPlayers) {
-          await assignFreeAgentRole(interaction, player.id);
-        }
-
-        // Delete all contracts
-        try {
-          await db.delete(contracts)
-            .where(eq(contracts.team_id, teamId));
         } catch (error) {
-          errors.push('Failed to delete contracts');
-          console.error('Error deleting contracts:', error);
-        }
-
-        // Delete Discord elements
-        if (interaction.guild) {
-          try {
-            const category = await interaction.guild.channels.cache.get(selectedTeam.discord_category_id);
-            if (category) {
-              const channelsInCategory = interaction.guild.channels.cache.filter(
-                channel => channel.parentId === category.id
-              );
-
-              await Promise.all(
-                channelsInCategory.map(channel => channel.delete())
-              );
-
-              await category.delete();
-            }
-          } catch (error) {
-            errors.push('Failed to delete some Discord channels');
-            console.error('Error deleting channels:', error);
-          }
-
-          try {
-            const teamRole = interaction.guild.roles.cache.find(role => role.name === selectedTeam.name);
-            if (teamRole) {
-              await teamRole.delete();
-            }
-          } catch (error) {
-            errors.push('Failed to delete team role');
-            console.error('Error deleting role:', error);
+          if (error instanceof Error) {
+            await interaction.editReply({
+              content: `Failed to delete team: ${error.message}`,
+              components: [],
+            });
+          } else {
+            await interaction.editReply({
+              content: 'An unknown error occurred while deleting the team.',
+              components: [],
+            });
           }
         }
-
-        // Finally, delete the team
-        try {
-          await db.delete(teams)
-            .where(eq(teams.id, teamId));
-        } catch (error) {
-          errors.push('Failed to delete team from database');
-          console.error('Error deleting team from database:', error);
-          throw error;
-        }
-
-        const successMessage = `Team ${selectedTeam.name} has been deleted.`;
-        const errorMessage = errors.length > 0
-          ? `\nWarning: Some operations failed: ${errors.join(', ')}`
-          : '';
-
-        await confirmation.update({
-          content: successMessage + errorMessage,
-          components: [],
-        });
 
       } catch (error) {
         console.error('Error in delete team command:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        await interaction.reply(`Failed to delete team: ${errorMessage}`);
+        // Use editReply instead of reply since we might have already replied
+        if (interaction.deferred) {
+          await interaction.editReply(`Failed to delete team: ${errorMessage}`);
+        } else {
+          await interaction.reply(`Failed to delete team: ${errorMessage}`);
+        }
       }
     },
   },
