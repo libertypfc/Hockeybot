@@ -12,25 +12,51 @@ export function registerRoutes(app: Express): Server {
   // API Routes
   app.get('/api/servers', async (req, res) => {
     try {
-      if (!client.isReady()) {
+      if (!client || !client.isReady()) {
         return res.status(503).json({
-          error: 'Discord client not ready',
-          details: 'The Discord connection is still initializing. Please try again in a few moments.'
+          error: 'Discord connection unavailable',
+          details: 'The Discord bot is still initializing or not connected. Please try again in a few moments.'
         });
       }
 
-      const guilds = await client.guilds.fetch();
+      // Get cached guilds first
+      let guilds = client.guilds.cache;
+
+      // If cache is empty, try to fetch
+      if (guilds.size === 0) {
+        try {
+          const fetchedGuilds = await client.guilds.fetch();
+          guilds = fetchedGuilds;
+        } catch (fetchError) {
+          console.error('Error fetching guilds:', fetchError);
+          return res.status(500).json({
+            error: 'Failed to fetch Discord servers',
+            details: 'Could not retrieve server list from Discord. Please verify bot permissions.'
+          });
+        }
+      }
+
+      // Map guild data
       const servers = Array.from(guilds.values()).map(guild => ({
         id: guild.id,
-        name: guild.name
+        name: guild.name,
+        memberCount: guild.memberCount
       }));
 
+      if (servers.length === 0) {
+        return res.status(404).json({
+          error: 'No servers found',
+          details: 'The bot is not a member of any Discord servers. Please add the bot to a server first.'
+        });
+      }
+
+      console.log('Returning servers:', servers); // Debug log
       res.json(servers);
     } catch (error) {
-      console.error('Error fetching servers:', error);
+      console.error('Error in /api/servers route:', error);
       res.status(500).json({ 
         error: 'Failed to fetch servers',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : 'Unknown error occurred while fetching servers'
       });
     }
   });
