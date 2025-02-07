@@ -1,6 +1,9 @@
-import { Client, GatewayIntentBits, Events, Collection, SlashCommandBuilder, ChatInputCommandInteraction, Partials } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Collection, SlashCommandBuilder, ChatInputCommandInteraction, Partials, REST, Routes } from 'discord.js';
 import { registerCommands } from './commands/index';
 import { handleContractReactions } from './interactions/contractReactions';
+import { db } from '@db';
+import { teams, players, contracts, waivers } from '@db/schema';
+import { eq } from 'drizzle-orm';
 
 declare module 'discord.js' {
   interface Client {
@@ -53,8 +56,20 @@ export async function startBot(): Promise<Client> {
 
     // Add reaction handlers
     client.on(Events.MessageReactionAdd, async (reaction, user) => {
-      if (user.bot) return; // Ignore bot reactions
-      await handleContractReactions(reaction, user);
+      try {
+        if (user.bot) return;
+        if (reaction.partial) {
+          try {
+            await reaction.fetch();
+          } catch (error) {
+            console.error('Error fetching partial reaction:', error);
+            return;
+          }
+        }
+        await handleContractReactions(reaction, user);
+      } catch (error) {
+        console.error('Error handling reaction:', error);
+      }
     });
 
     // Add interaction handler for slash commands
@@ -88,6 +103,47 @@ export async function startBot(): Promise<Client> {
             ephemeral: true
           });
         }
+      }
+    });
+
+    // Add guild join handler
+    client.on(Events.GuildCreate, async (guild) => {
+      console.log(`Joined new guild: ${guild.name} (${guild.id})`);
+      try {
+        // Check if guild already has data
+        const existingTeams = await db.query.teams.findMany({
+          where: eq(teams.guild_id, guild.id)
+        });
+
+        if (existingTeams.length === 0) {
+          console.log(`Initializing database for new guild: ${guild.name}`);
+
+          // Clear any existing data for this guild
+          const guildId = guild.id;
+          await Promise.all([
+            db.delete(contracts).where(eq(contracts.guild_id, guildId)),
+            db.delete(waivers).where(eq(waivers.guild_id, guildId)),
+            db.delete(players).where(eq(players.guild_id, guildId)),
+            db.delete(teams).where(eq(teams.guild_id, guildId))
+          ]);
+
+          // Register slash commands for the new guild
+          try {
+            const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
+            const commands = Array.from(client.commands.values()).map(cmd => cmd.data.toJSON());
+
+            await rest.put(
+              Routes.applicationGuildCommands(client.user!.id, guild.id),
+              { body: commands }
+            );
+
+            console.log(`Successfully registered commands for guild: ${guild.name}`);
+          } catch (error) {
+            console.error(`Failed to register commands for guild ${guild.name}:`, error);
+          }
+        }
+      } catch (error) {
+        console.error(`Error initializing database for guild ${guild.name}:`, error);
       }
     });
 

@@ -47,7 +47,7 @@ export function registerRoutes(app: Express): Server {
         const servers = Array.from(guilds.values()).map(guild => ({
           id: guild.id,
           name: guild.name,
-          memberCount: guild.approximateMemberCount || 0
+          memberCount: guild.memberCount || 0  // Use memberCount instead of approximateMemberCount
         }));
 
         if (servers.length === 0) {
