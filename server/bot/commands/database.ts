@@ -11,22 +11,22 @@ export const DatabaseCommands = [
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addSubcommand(subcommand =>
         subcommand
-          .setName('cleanteams')
-          .setDescription('WARNING: Removes all teams from the database')
+          .setName('purgeall')
+          .setDescription('WARNING: Removes all data from the database')
       )
       .addSubcommand(subcommand =>
         subcommand
-          .setName('cleanplayers')
+          .setName('purgeplayers')
           .setDescription('WARNING: Removes all players from the database')
       )
       .addSubcommand(subcommand =>
         subcommand
-          .setName('cleancontracts')
+          .setName('purgecontracts')
           .setDescription('WARNING: Removes all contracts from the database')
       )
       .addSubcommand(subcommand =>
         subcommand
-          .setName('cleanwaivers')
+          .setName('purgewaivers')
           .setDescription('WARNING: Removes all waivers from the database')
       ),
 
@@ -37,22 +37,26 @@ export const DatabaseCommands = [
         const subcommand = interaction.options.getSubcommand();
 
         switch (subcommand) {
-          case 'cleanteams':
+          case 'purgeall':
+            // Delete in order to maintain referential integrity
+            await db.delete(contracts);
+            await db.delete(waivers);
+            await db.delete(players);
             await db.delete(teams);
-            await interaction.editReply('All teams have been removed from the database.');
+            await interaction.editReply('All data has been purged from the database.');
             break;
 
-          case 'cleanplayers':
+          case 'purgeplayers':
             await db.delete(players);
             await interaction.editReply('All players have been removed from the database.');
             break;
 
-          case 'cleancontracts':
+          case 'purgecontracts':
             await db.delete(contracts);
             await interaction.editReply('All contracts have been removed from the database.');
             break;
 
-          case 'cleanwaivers':
+          case 'purgewaivers':
             await db.delete(waivers);
             await interaction.editReply('All waivers have been removed from the database.');
             break;
