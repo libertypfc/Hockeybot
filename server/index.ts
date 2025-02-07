@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from 'http';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { startBot } from "./bot/discord";
+import { startBot } from "./bot";
 
 const app = express();
 app.use(express.json());
@@ -79,12 +79,15 @@ async function startApplication() {
       });
     });
 
-    // Start Discord bot with delay to ensure server is ready
-    setTimeout(async () => {
+    // Start Discord bot with retries
+    let botStartAttempts = 0;
+    const maxBotStartAttempts = 3;
+    const startBot = async () => {
       try {
         console.log('='.repeat(50));
         console.log('[BOT STARTUP] Attempting to start Discord bot...');
         console.log('='.repeat(50));
+
         const discordClient = await startBot();
         if (discordClient && discordClient.isReady()) {
           console.log('='.repeat(50));
@@ -92,17 +95,27 @@ async function startApplication() {
           console.log(`[BOT STARTUP] Bot username: ${discordClient.user?.tag}`);
           console.log(`[BOT STARTUP] Connected to ${discordClient.guilds.cache.size} guilds`);
           console.log('='.repeat(50));
-        } else {
-          console.error('='.repeat(50));
-          console.error('[BOT STARTUP ERROR] Discord bot started but is not ready');
-          console.error('='.repeat(50));
+          return true;
         }
+        return false;
       } catch (error) {
         console.error('='.repeat(50));
         console.error('[BOT STARTUP ERROR] Failed to start Discord bot:', error);
         console.error('='.repeat(50));
+        return false;
       }
-    }, 5000); // 5 second delay before starting bot
+    };
+
+    // Initial attempt with delay
+    setTimeout(async () => {
+      while (botStartAttempts < maxBotStartAttempts) {
+        if (await startBot()) break;
+        botStartAttempts++;
+        if (botStartAttempts < maxBotStartAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 5000 * botStartAttempts));
+        }
+      }
+    }, 5000); // Initial 5-second delay
 
     return true;
   } catch (error) {
