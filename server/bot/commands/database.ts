@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, EmbedBuilder, ChannelType } from 'discord.js';
 import { db } from '@db';
 import { teams, players, contracts, waivers } from '@db/schema';
 import { eq } from 'drizzle-orm';
@@ -60,7 +60,11 @@ export const DatabaseCommands = [
             option.setName('salary')
               .setDescription('Player salary')
               .setRequired(true))
-      ),
+      )
+      .addSubcommand(subcommand =>
+        subcommand
+          .setName('listcategories')
+          .setDescription('List all category IDs in the server')),
 
     async execute(interaction: ChatInputCommandInteraction) {
       try {
@@ -84,6 +88,35 @@ export const DatabaseCommands = [
         const subcommand = interaction.options.getSubcommand();
 
         switch (subcommand) {
+          case 'listcategories': {
+            const categories = interaction.guild.channels.cache
+              .filter(channel => channel.type === ChannelType.GuildCategory)
+              .map(category => ({
+                name: category.name,
+                id: category.id
+              }));
+
+            if (categories.length === 0) {
+              return interaction.editReply('No categories found in this server.');
+            }
+
+            const embed = new EmbedBuilder()
+              .setTitle('Category IDs')
+              .setDescription('Here are all category IDs in this server:')
+              .addFields(
+                categories.map(cat => ({
+                  name: cat.name,
+                  value: `\`${cat.id}\``,
+                  inline: true
+                }))
+              )
+              .setColor('#0099ff')
+              .setFooter({ text: 'Use these IDs with the /database addteam command' });
+
+            await interaction.editReply({ embeds: [embed] });
+            break;
+          }
+
           case 'addteam': {
             const name = interaction.options.getString('name', true);
             const categoryId = interaction.options.getString('categoryid', true);
@@ -92,11 +125,11 @@ export const DatabaseCommands = [
             const [team] = await db.insert(teams)
               .values({
                 name,
-                guildId,
-                discordCategoryId: categoryId,
-                salaryCap: 82500000,
-                availableCap: 82500000,
-                capFloor: 60375000,
+                guild_id: guildId,
+                discord_category_id: categoryId,
+                salary_cap: 82500000,
+                available_cap: 82500000,
+                cap_floor: 60375000,
                 metadata: JSON.stringify({})
               })
               .returning();
