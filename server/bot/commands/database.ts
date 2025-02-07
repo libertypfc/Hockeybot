@@ -43,8 +43,17 @@ export const DatabaseCommands = [
       const member = await interaction.guild.members.fetch(interaction.user.id);
       const hasRequiredRole = member.roles.cache.some(role => role.name === REQUIRED_ROLE_NAME);
 
+      // Log available roles for debugging
+      const availableRoles = member.roles.cache.map(role => role.name).join(', ');
+      console.log(`User ${member.user.tag} roles: ${availableRoles}`);
+
       if (!hasRequiredRole) {
-        return interaction.editReply(`You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.`);
+        return interaction.editReply(
+          `You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.\n\n` +
+          `Please ask a server administrator to:\n` +
+          `1. Create a role named exactly "${REQUIRED_ROLE_NAME}"\n` +
+          `2. Assign this role to users who should have database management permissions`
+        );
       }
 
       try {
