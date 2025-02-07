@@ -63,8 +63,14 @@ export const OrganizationCommands = [
 
         // Create team channels
         const channels = await Promise.all([
+          // Text Channels
           interaction.guild.channels.create({
-            name: 'announcements',
+            name: 'team-chat',
+            type: ChannelType.GuildText,
+            parent: category.id,
+          }),
+          interaction.guild.channels.create({
+            name: 'roster',
             type: ChannelType.GuildText,
             parent: category.id,
             permissionOverwrites: [
@@ -76,13 +82,19 @@ export const OrganizationCommands = [
             ]
           }),
           interaction.guild.channels.create({
-            name: 'general',
+            name: 'signing',
             type: ChannelType.GuildText,
             parent: category.id,
           }),
           interaction.guild.channels.create({
-            name: 'strategy',
+            name: 'stats-picture',
             type: ChannelType.GuildText,
+            parent: category.id,
+          }),
+          // Voice Channel
+          interaction.guild.channels.create({
+            name: 'Team Chat',
+            type: ChannelType.GuildVoice,
             parent: category.id,
           }),
         ]);
@@ -100,7 +112,8 @@ export const OrganizationCommands = [
               roleId: teamRole.id,
               channels: channels.map(ch => ({
                 name: ch.name,
-                id: ch.id
+                id: ch.id,
+                type: ch.type
               }))
             }),
           })
@@ -112,7 +125,8 @@ export const OrganizationCommands = [
           .addFields(
             { name: 'Salary Cap', value: `$${team.salary_cap?.toLocaleString() ?? 0}`, inline: true },
             { name: 'Cap Floor', value: `$${team.cap_floor?.toLocaleString() ?? 0}`, inline: true },
-            { name: 'Channels Created', value: channels.map(ch => `<#${ch.id}>`).join('\n'), inline: false },
+            { name: 'Text Channels', value: channels.filter(ch => ch.type === ChannelType.GuildText).map(ch => `<#${ch.id}>`).join('\n'), inline: false },
+            { name: 'Voice Channels', value: channels.filter(ch => ch.type === ChannelType.GuildVoice).map(ch => `🔊 ${ch.name}`).join('\n'), inline: false },
             { name: 'Team Role', value: `<@&${teamRole.id}>`, inline: false }
           )
           .setColor(teamRole.color)
