@@ -33,31 +33,38 @@ export const DatabaseCommands = [
       ),
 
     async execute(interaction: ChatInputCommandInteraction) {
-      await interaction.deferReply();
-
-      // Check if user has the required role
-      if (!interaction.guild || !interaction.member) {
-        return interaction.editReply('This command can only be used in a server.');
-      }
-
-      const member = await interaction.guild.members.fetch(interaction.user.id);
-      const hasRequiredRole = member.roles.cache.some(role => role.name === REQUIRED_ROLE_NAME);
-
-      // Log available roles for debugging
-      const availableRoles = member.roles.cache.map(role => role.name).join(', ');
-      console.log(`User ${member.user.tag} roles: ${availableRoles}`);
-
-      if (!hasRequiredRole) {
-        return interaction.editReply(
-          `You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.\n\n` +
-          `Please ask a server administrator to:\n` +
-          `1. Create a role named exactly "${REQUIRED_ROLE_NAME}"\n` +
-          `2. Assign this role to users who should have database management permissions`
-        );
-      }
-
       try {
+        await interaction.deferReply({ ephemeral: true });
+        console.log('Database command initiated by:', interaction.user.tag);
+
+        // Check if command is used in a guild
+        if (!interaction.guild || !interaction.member) {
+          console.log('Command used outside of guild context');
+          return await interaction.editReply('This command can only be used in a server.');
+        }
+
+        const member = await interaction.guild.members.fetch(interaction.user.id);
+        console.log('Member fetched:', member.user.tag);
+
+        // Log available roles
+        const availableRoles = member.roles.cache.map(role => role.name);
+        console.log('Available roles:', availableRoles.join(', '));
+
+        const hasRequiredRole = member.roles.cache.some(role => role.name === REQUIRED_ROLE_NAME);
+        console.log('Has required role:', hasRequiredRole);
+
+        if (!hasRequiredRole) {
+          const errorMessage = `You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.\n\n` +
+            `Please ask a server administrator to:\n` +
+            `1. Create a role named exactly "${REQUIRED_ROLE_NAME}"\n` +
+            `2. Assign this role to users who should have database management permissions`;
+
+          console.log('Sending role requirement error to user:', interaction.user.tag);
+          return await interaction.editReply(errorMessage);
+        }
+
         const subcommand = interaction.options.getSubcommand();
+        console.log('Executing subcommand:', subcommand);
 
         switch (subcommand) {
           case 'purgeall':
@@ -90,7 +97,17 @@ export const DatabaseCommands = [
       } catch (error) {
         console.error('Error in database command:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-        await interaction.editReply(`Failed to execute command: ${errorMessage}`);
+
+        // Make sure we have a valid interaction to reply to
+        if (interaction.deferred) {
+          await interaction.editReply(`Failed to execute command: ${errorMessage}`);
+        } else {
+          try {
+            await interaction.reply({ content: `Failed to execute command: ${errorMessage}`, ephemeral: true });
+          } catch (replyError) {
+            console.error('Failed to send error message:', replyError);
+          }
+        }
       }
     },
   },
