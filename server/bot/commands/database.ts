@@ -2,6 +2,8 @@ import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits }
 import { db } from '@db';
 import { teams, players, contracts, waivers } from '@db/schema';
 
+const REQUIRED_ROLE_NAME = "Database Manager";
+
 // Combine all database commands into a single command with subcommands
 export const DatabaseCommands = [
   {
@@ -32,6 +34,18 @@ export const DatabaseCommands = [
 
     async execute(interaction: ChatInputCommandInteraction) {
       await interaction.deferReply();
+
+      // Check if user has the required role
+      if (!interaction.guild || !interaction.member) {
+        return interaction.editReply('This command can only be used in a server.');
+      }
+
+      const member = await interaction.guild.members.fetch(interaction.user.id);
+      const hasRequiredRole = member.roles.cache.some(role => role.name === REQUIRED_ROLE_NAME);
+
+      if (!hasRequiredRole) {
+        return interaction.editReply(`You need the "${REQUIRED_ROLE_NAME}" role to use database management commands.`);
+      }
 
       try {
         const subcommand = interaction.options.getSubcommand();
